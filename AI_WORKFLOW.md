@@ -1,99 +1,126 @@
-# AI_WORKFLOW.md — Model Tier Selection & AI-Assisted Development Workflow
+# AI_WORKFLOW.md — Model Tier Selection & AI Development Workflow
 
-This document defines the workflow and model-selection strategy for AI-assisted development on **DEM Cleaner** in Gemini Antigravity. Its goal is to maximize engineering quality while minimizing token consumption and turnaround time by matching task complexity to the appropriate model capability tier.
+This document establishes the strategy for pairing task complexity with the appropriate AI model capability tier in Gemini Antigravity, defines task execution modes, and outlines context-efficient handoff protocols.
 
 ---
 
 ## 1. Model Capability Tiers
 
-Treat these three tiers as relative capability categories that map to the high-reasoning, balanced, and fast/lightweight models available in Antigravity. **Do not automatically use a Tier 1 model for every task.**
+Model tiers represent relative capability categories. **Do not default to the highest capability model for every task.** Choose the tier that matches the task's complexity, architectural risk, and mathematical depth.
 
 ### Tier 1 — High-Capability Reasoning Model
-Reserve Tier 1 for high-complexity, high-risk, or cross-cutting work where subtle errors in math, concurrency, or architecture would cause regressions:
+Reserve for high-risk, complex, or cross-cutting engineering tasks where flawed logic would introduce subtle regressions:
 
 - **Numerical, Mathematical & GIS Algorithms**:
-  - Modifying Gauss-Seidel SOR Laplace interpolation ([`DemProcessor.InterpolateVoidsInPlace`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L556-L686)) or C0/C1 cross-tile seam smoothing ([`DemProcessor.ApplyTileSeamSmoothing`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L262-L497)).
-  - Changing GeoTIFF coordinate tiepoint math, bilinear sub-tile resampling ([`ExtractResampledSubTile`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L1105-L1155)), or UTM/EPSG projections ([`UtmCoordinateConverter`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/UtmCoordinateConverter.cs)).
-- **Concurrency, Threading & GPU Memory Performance**:
-  - Modifying async cancellation lifecycles (`_cts` vs. `_cts3D`), `Parallel.For` unsafe pointer/backbuffer writes in [`Build3DHeightmapAssets`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L1238-L1609), or reducing memory pressure across multi-gigabyte DEM tile sets.
-- **Architectural Design & Major Refactoring**:
-  - Extracting subsystems out of the 3,556-line [MainWindow.xaml.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs) into dedicated services or view-controllers.
-- **Complex Multi-System Debugging & High-Risk Reviews**:
-  - Diagnosing elusive bugs spanning TIFF binary decoding, normalized coordinate transforms, and WPF 3D rendering, or reviewing large diffs before release.
+  - Modifying Gauss-Seidel SOR Laplace relaxation in `DemProcessor.InterpolateVoidsInPlace` or C0/C1 seam smoothing in `DemProcessor.ApplyTileSeamSmoothing`.
+  - Bilinear resampling in `DemProcessor.ExtractResampledSubTile` or ellipsoidal coordinate projection math in `UtmCoordinateConverter`.
+- **Concurrency & Memory Optimization**:
+  - Managing async lifecycles (`_cts` vs. `_cts3D`), `Parallel.For` CPU throttling, or memory optimization across multi-gigabyte tile sets.
+- **Architectural Design & High-Risk Reviews**:
+  - Designing refactorings to decouple `MainWindow.xaml.cs` or conducting architectural reviews prior to releases.
 
 ### Tier 2 — Mid-Tier Balanced Model
-Use Tier 2 as the default workhorse for standard feature development, localized bug fixes, and component integration:
+The primary workhorse for standard implementation, debugging, and feature development:
 
 - **Standard Feature Implementation**:
-  - Adding a new export resolution preset family, a new void-filling option, or a settings persistence service (e.g., saving/loading user preferences to JSON).
-  - Adding new columns or summary metrics to `DgTiles` or `DgExpectedOutputs`.
-- **Moderate Refactoring & UI Interaction Logic**:
-  - Updating 2D mosaic canvas overlay interactions, gizmo behavior, or scale bar calculations in [MainWindow.xaml.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs).
-  - Synchronizing changes between [`UpdateExpectedOutputFilesList`](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs#L2275-L2400) and [`ExportCustomAreaSetAsync`](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs#L2925-L3128).
-- **Localized Bug Investigation & Testing**:
-  - Fixing UI state synchronization bugs (`_isBusy`, `_isSyncingExportResolutionBoxes`, aspect ratio locking).
-  - Expanding `--self-test` in [App.xaml.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/App.xaml.cs) or setting up unit tests for `DemProcessor` and `TiffDemReader`.
+  - Adding new resolution presets, new void-filling options, or settings persistence.
+  - Adding columns or summary metrics to `DgTiles` or `DgExpectedOutputs`.
+- **UI Interaction & Workflow Logic**:
+  - Updating 2D canvas overlay interactions, export crop gizmo logic, or scale bar updates in `MainWindow.xaml.cs`.
+  - Keeping preview calculations in `UpdateExpectedOutputFilesList` synchronized with `ExportCustomAreaSetAsync`.
+- **Localized Debugging & Testing**:
+  - Resolving UI state synchronization issues (`_isBusy`, `_isSyncingExportResolutionBoxes`).
+  - Expanding `--self-test` in `App.xaml.cs` or authoring new unit tests.
 
 ### Tier 3 — Fast / Low-Cost Model
-Delegate routine, well-defined, or low-risk tasks to Tier 3 to save cost and latency:
+Use for routine, narrow, or low-risk tasks to minimize latency and token expenditure:
 
-- **UI Styling, Themes & Layout Tweaks**:
-  - Adding or tweaking `AppThemePalette` colors in [Services/ThemeManager.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/ThemeManager.cs).
-  - Updating XAML margins, tooltips, labels, button text, or control templates in [MainWindow.xaml](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml).
-- **Terrain Color Ramps**:
-  - Adding a new color ramp case to [`DemProcessor.EvaluateTerrainColorRamp`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L1765-L1876).
-- **Simple Bug Fixes & Cleanup**:
-  - Fixing a known typo, a null-check, or removing dead code (such as the empty `SyncGridDimensionsBoxes` hook) when requirements are explicit.
-- **Documentation & Routine Investigation**:
-  - Updating `AGENTS.md`, `ARCHITECTURE.md`, `DEVELOPMENT.md`, `README.md`, or explaining existing methods.
+- **Styling, Themes & Layout**:
+  - Adding or adjusting `AppThemePalette` colors in `ThemeManager.cs`.
+  - Updating XAML margins, labels, button text, or control templates in `MainWindow.xaml`.
+- **Color Palettes**:
+  - Adding a new terrain color ramp to `DemProcessor.EvaluateTerrainColorRamp`.
+- **Routine Code Cleanup & Explanations**:
+  - Removing dead code hooks, updating comments, or explaining existing methods.
+- **Documentation Maintenance**:
+  - Updating `AGENTS.md`, `ARCHITECTURE.md`, `DEVELOPMENT.md`, or `README.md`.
 
 ---
 
-## 2. Quick Task-to-Tier Mapping for DEM Cleaner
+## 2. Decoupling Model Tier from Execution Mode
 
-| Task Type | Target Files | Recommended Tier |
-| :--- | :--- | :---: |
-| Add/edit color themes or XAML styles/tooltips | `Services/ThemeManager.cs`, `MainWindow.xaml` | **Tier 3** |
-| Add a 3D terrain color ramp palette | `Services/DemProcessor.cs`, `MainWindow.xaml` | **Tier 3** |
-| Update project documentation | `*.md` | **Tier 3** |
-| Add UI controls and wire them to `DemProcessingOptions` | `MainWindow.xaml`, `MainWindow.xaml.cs`, `Models/DemTile.cs` | **Tier 2** |
-| Modify export file naming, resolution presets, or expected output table | `MainWindow.xaml.cs`, `Models/DemTile.cs` | **Tier 2** |
-| Expand `--self-test` or add unit tests | `App.xaml.cs`, test files | **Tier 2** |
-| Modify Laplace void interpolation or inter-tile seam smoothing math | `Services/DemProcessor.cs` | **Tier 1** |
-| Modify GeoTIFF tag decoding/encoding or UTM coordinate math | `Services/TiffDemReader.cs`, `Services/UtmCoordinateConverter.cs` | **Tier 1** |
-| Refactor `MainWindow.xaml.cs` architecture or optimize 3D/RAM usage | `MainWindow.xaml.cs`, `Services/DemProcessor.cs` | **Tier 1** |
+Model capability and task execution mode are orthogonal. Any tier can operate in any execution mode depending on the task:
+
+- **Tier 1 in PLAN ONLY mode**: Designing an architectural decoupling strategy for `MainWindow.xaml.cs` before writing code.
+- **Tier 2 in IMPLEMENT mode**: Adding a new resolution preset family and wiring it to UI controls.
+- **Tier 3 in INVESTIGATE ONLY mode**: Searching the XAML hierarchy to find where a specific theme brush resource key is referenced.
+- **Tier 1 in REVIEW ONLY mode**: Auditing a complex PR modifying the seam-smoothing algorithm for mathematical correctness.
 
 ---
 
 ## 3. Escalation & De-escalation Rules
 
-### When to Escalate to a Higher Tier (Tier 3 → Tier 2, or Tier 2 → Tier 1)
-1. **Unresolved Root Cause**: If a Tier 3 or Tier 2 model cannot confidently identify the root cause of a bug after inspecting the directly relevant methods, stop guessing and escalate.
-2. **Cross-Boundary Impact**: If a seemingly simple UI change requires altering `MosaicDescriptor` coordinate mapping, async `CancellationTokenSource` lifecycles, or thread synchronization, escalate to Tier 2 or Tier 1.
-3. **Scope Expansion**: If a task expands to touch more than 3 methods in [MainWindow.xaml.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs) and [Services/DemProcessor.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs) simultaneously, reassess the model tier.
-4. **High Regression Risk**: Any change that modifies pixel buffer indexing (`y * width + x`), elevation normalization ranges (`GetEffectiveNormalizationRange`), or GeoTIFF binary scanline/tile reads/writes should either be implemented or reviewed by a Tier 1 model.
+### Escalation Triggers (Tier 3 → Tier 2, or Tier 2 → Tier 1)
+Stop execution and recommend escalating to a higher model tier when:
+1. **Uncertain Root Cause**: A bug's root cause cannot be conclusively identified after focused investigation.
+2. **Retry Limit Exceeded**: **Maximum of 2 consecutive failed attempts** on a debugging or implementation task without new evidence. Do not attempt speculative fixes.
+3. **Architectural Boundary Shift**: An apparently simple change requires modifying `MosaicDescriptor`, thread synchronization, or core async lifecycles.
+4. **Numerical / Coordinate Sensitivity**: The change directly affects elevation sample arrays, boundary interpolation, or GeoTIFF tag encoding.
+5. **Multi-System Impact**: The task expands to modify multiple services simultaneously.
 
-### When to De-escalate to a Lower Tier (Tier 1 → Tier 2/3)
-1. **Plan-Then-Execute Split**: When a complex feature requires architectural design, use **Tier 1** to design the implementation plan (specifying exact method signatures and equations), then switch to **Tier 2** or **Tier 3** to execute the boilerplate XAML wiring, implementation, and documentation updates.
+### De-escalation Strategy (Plan-Then-Execute)
+For complex multi-system tasks, split the workflow:
+1. Use **Tier 1** in `PLAN ONLY` mode to formulate a specific, actionable implementation plan.
+2. Hand off the plan to **Tier 2** or **Tier 3** in `IMPLEMENT` mode to execute the defined code changes and documentation updates.
 
 ---
 
-## 4. Standard AI Development Workflow
+## 4. Standard Compact Model Handoff Format
 
-All AI agents working on this repository must follow this 10-step workflow:
+When handing off a task to another model tier or starting a new conversation, use this concise template:
 
-1. **Understand the Task**: Read the user request carefully. Clarify ambiguities before writing code.
-2. **Assess Complexity & Risk**: Consult Section 1 and Section 2 of this document to evaluate the scope and regression risk.
-3. **Verify Model Tier Suitability**: If operating on a lower-tier model and the task triggers an escalation rule in Section 3, notify the user and recommend switching to a higher-tier model (or using `/plan` first).
-4. **Inspect Targeted Context**:
-   - Read [AGENTS.md](file:///C:/Users/redla/repositories/DEM%20Cleaner/AGENTS.md) and the relevant sections of [ARCHITECTURE.md](file:///C:/Users/redla/repositories/DEM%20Cleaner/ARCHITECTURE.md) rather than scanning the entire codebase from scratch.
-   - Use targeted line-range reads on large files ([MainWindow.xaml.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs) is 3,556 lines; [Services/DemProcessor.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs) is 1,877 lines; [MainWindow.xaml](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml) is 1,463 lines) to conserve context window tokens.
-5. **Formulate a Plan**: For multi-file or non-trivial changes, outline the exact methods and UI controls affected before editing.
-6. **Implement the Smallest Reasonable Change**: Make surgical edits. Preserve existing comments, formatting, and unrelated uncommitted work.
-7. **Build & Verify (`Release` Mode)**:
-   - Run `dotnet build -c Release` (avoiding the `Debug` PostBuild GUI launch).
-   - Run `./bin/Release/net8.0-windows/DemCleaner.exe --self-test` when applicable.
-8. **Review the Diff**: Run `git diff` on modified files to verify no accidental regressions, missing `.Freeze()` calls, or recursive UI event triggers were introduced.
-9. **Maintain Documentation**: Update [ARCHITECTURE.md](file:///C:/Users/redla/repositories/DEM%20Cleaner/ARCHITECTURE.md) or [DEVELOPMENT.md](file:///C:/Users/redla/repositories/DEM%20Cleaner/DEVELOPMENT.md) if architectural boundaries, build steps, or workflows changed.
-10. **Summarize Concisely**: Report the files changed, verification results, and any remaining questions or follow-ups.
+```markdown
+### AI Task Handoff
+- **Objective**: [Concise description of the task goal]
+- **Current Mode**: [INVESTIGATE ONLY | PLAN ONLY | IMPLEMENT | REVIEW ONLY]
+- **Target Files & Methods**: [Specific files and method names]
+- **Verified Findings**: [Factual, confirmed findings from code inspection]
+- **Architectural Invariants & Constraints**: [Applicable invariants from AGENTS.md]
+- **Changes Completed**: [What has already been modified or tested]
+- **Tests Executed & Results**: [Build/test commands run and their status]
+- **Unresolved Questions / Blockers**: [What remains uncertain or blocked]
+- **Recommended Next Action**: [Immediate next step for the receiving agent]
+- **Suggested Model Tier**: [Tier 1 | Tier 2 | Tier 3]
+```
 
+---
+
+## 5. Context-Efficiency Rules
+
+To keep token consumption low and maintain responsiveness:
+
+1. **Read AGENTS.md First**: Rely on [AGENTS.md](AGENTS.md) as the default operational reference. Only inspect [ARCHITECTURE.md](ARCHITECTURE.md) or [DEVELOPMENT.md](DEVELOPMENT.md) when the task touches architectural boundaries or build/release procedures.
+2. **Targeted Code Reads**: Inspect specific methods or line ranges rather than loading entire large files into context.
+3. **Do Not Re-quote Code**: Avoid printing large blocks of existing, unchanged source code in chat responses.
+4. **Keep Scope Narrow**: Avoid combining refactoring, feature development, and documentation updates into a single task.
+5. **Fresh Sessions for Distinct Tasks**: When switching to an unrelated feature, begin a fresh conversation rather than carrying stale context forward.
+
+---
+
+## 6. Planning & Review Thresholds
+
+- **Formal Planning Required**: Any task that modifies mathematical algorithms (`DemProcessor`), GeoTIFF metadata handling (`TiffDemReader`), or cross-cutting async workflows (`MainWindow`) must begin in `PLAN ONLY` mode.
+- **Direct Implementation Allowed**: Localized UI tweaks, documentation maintenance, and self-contained bug fixes with verified root causes may proceed directly in `IMPLEMENT` mode.
+- **Mandatory Review**: Any modification touching `RawData`, `BaseFilledData`, `FilledData`, or Freezable `.Freeze()` calls requires verification by a Tier 1 model or peer review before merging.
+
+---
+
+## 7. Documentation Maintenance Rules
+
+Update documentation only when meaningful changes occur:
+
+- **Update [AGENTS.md](AGENTS.md)** when operational invariants, Git rules, or execution modes change.
+- **Update [ARCHITECTURE.md](ARCHITECTURE.md)** when system boundaries, data structures, algorithms, or technical limitations change.
+- **Update [DEVELOPMENT.md](DEVELOPMENT.md)** when build targets, testing procedures, dependencies, or release steps change.
+- **Update [AI_WORKFLOW.md](AI_WORKFLOW.md)** when model tier assignments, handoff standards, or escalation rules change.
+- **Do Not Update Documentation** for trivial bug fixes, variable renames, or cosmetic UI styling changes.
