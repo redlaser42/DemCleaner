@@ -104,6 +104,9 @@ public partial class MainWindow : Window
         CmbTheme.SelectedIndex = 0; // Default: Sage & Sandstone (Darker Tan BG / Green Panels)
         ThemeManager.ApplyTheme(Resources, ThemeManager.Themes[0]);
 
+        Closing += MainWindow_Closing;
+        ApplyLoadedSettings(UserSettingsService.Load());
+
         LoadLicenseTooltipText();
         UpdateExportResolutionPresetButtons();
         Update3DCameraTransform();
@@ -111,6 +114,134 @@ public partial class MainWindow : Window
         UpdateNewExportResolutionSummary();
 
         _isInitializing = false;
+    }
+
+    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        SaveCurrentSettings();
+    }
+
+    private void ApplyLoadedSettings(UserSettings settings)
+    {
+        if (settings.ThemeIndex >= 0 && settings.ThemeIndex < ThemeManager.Themes.Count)
+        {
+            CmbTheme.SelectedIndex = settings.ThemeIndex;
+            ThemeManager.ApplyTheme(Resources, ThemeManager.Themes[settings.ThemeIndex]);
+        }
+
+        if (settings.MapProvider == "Google Maps")
+        {
+            RbMapProviderGoogleMaps.IsChecked = true;
+            RbMapProviderGoogleEarth.IsChecked = false;
+        }
+        else
+        {
+            RbMapProviderGoogleEarth.IsChecked = true;
+            RbMapProviderGoogleMaps.IsChecked = false;
+        }
+
+        ChkUseGdalNoData.IsChecked = settings.UseGdalNoData;
+        ChkUseCustomThreshold.IsChecked = settings.UseCustomThreshold;
+        if (settings.ComparisonIndex >= 0 && settings.ComparisonIndex < CmbComparison.Items.Count)
+        {
+            CmbComparison.SelectedIndex = settings.ComparisonIndex;
+        }
+        if (!string.IsNullOrWhiteSpace(settings.CustomNoDataValue))
+        {
+            TxtCustomNoData.Text = settings.CustomNoDataValue;
+        }
+
+        RbFillMin.IsChecked = settings.FillMethod == 0;
+        RbFillMax.IsChecked = settings.FillMethod == 1;
+        RbFillMean.IsChecked = settings.FillMethod == 2;
+        RbFillInterpolated.IsChecked = settings.FillMethod == 3;
+        if (BdrInterpolatedNote != null)
+        {
+            BdrInterpolatedNote.Visibility = settings.FillMethod == 3 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        SldIterations.Value = Math.Clamp(settings.InterpolationPasses, 1, 500);
+
+        ChkUseGlobalForConstantFill.IsChecked = settings.UseGlobalForConstantFill;
+        ChkEnablePerTileFillOverride.IsChecked = settings.EnablePerTileFillOverride;
+        ColTileFillOverride.Visibility = settings.EnablePerTileFillOverride ? Visibility.Visible : Visibility.Collapsed;
+        PnlSelectedTileOverride.Visibility = settings.EnablePerTileFillOverride ? Visibility.Visible : Visibility.Collapsed;
+
+        int smoothingSteps = Math.Clamp(settings.SeamSmoothingSteps, 0, 20);
+        SldSeamSmoothingSteps.Value = smoothingSteps;
+        TxtSeamSmoothingStepsLabel.Text = smoothingSteps == 0 ? "0 steps (Off)" : $"{smoothingSteps} step(s)";
+
+        RbExportSourceGrid.IsChecked = settings.ExportLayout == 0;
+        RbExportSingleImage.IsChecked = settings.ExportLayout == 1;
+        RbExportCustomGrid.IsChecked = settings.ExportLayout == 2;
+        GrdNewExportCustomGrid.Visibility = settings.ExportLayout == 2 ? Visibility.Visible : Visibility.Collapsed;
+        if (!string.IsNullOrWhiteSpace(settings.ExportGridSize))
+        {
+            TxtNewExportGridSize.Text = settings.ExportGridSize;
+        }
+
+        if (settings.ResolutionPresetSetIndex >= 0 && settings.ResolutionPresetSetIndex < CmbExportResolutionPresetSet.Items.Count)
+        {
+            CmbExportResolutionPresetSet.SelectedIndex = settings.ResolutionPresetSetIndex;
+        }
+        if (!string.IsNullOrWhiteSpace(settings.ExportWidth))
+        {
+            TxtNewExportWidth.Text = settings.ExportWidth;
+        }
+        if (!string.IsNullOrWhiteSpace(settings.ExportHeight))
+        {
+            TxtNewExportHeight.Text = settings.ExportHeight;
+        }
+        ChkLockExportAspectRatio.IsChecked = settings.LockExportAspectRatio;
+
+        if (settings.ExportFileFormatIndex >= 0 && settings.ExportFileFormatIndex < CmbExportFileFormat.Items.Count)
+        {
+            CmbExportFileFormat.SelectedIndex = settings.ExportFileFormatIndex;
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.ExportFolder))
+        {
+            TxtExportFolder.Text = settings.ExportFolder;
+        }
+
+        ChkExportStandardXyNaming.IsChecked = settings.ExportStandardXyNaming;
+        GrdExportPrefixRow.Visibility = settings.ExportStandardXyNaming ? Visibility.Visible : Visibility.Collapsed;
+        GrdExportSuffixRow.Visibility = settings.ExportStandardXyNaming ? Visibility.Collapsed : Visibility.Visible;
+        TxtExportPrefix.Text = settings.ExportPrefix;
+        TxtExportSuffix.Text = settings.ExportSuffix;
+    }
+
+    private void SaveCurrentSettings()
+    {
+        var settings = new UserSettings
+        {
+            ThemeIndex = CmbTheme.SelectedIndex,
+            MapProvider = RbMapProviderGoogleMaps.IsChecked == true ? "Google Maps" : "Google Earth",
+            UseGdalNoData = ChkUseGdalNoData.IsChecked == true,
+            UseCustomThreshold = ChkUseCustomThreshold.IsChecked == true,
+            ComparisonIndex = CmbComparison.SelectedIndex,
+            CustomNoDataValue = TxtCustomNoData.Text,
+            FillMethod = RbFillInterpolated.IsChecked == true ? 3 :
+                         RbFillMean.IsChecked == true ? 2 :
+                         RbFillMax.IsChecked == true ? 1 : 0,
+            InterpolationPasses = (int)Math.Round(SldIterations.Value),
+            UseGlobalForConstantFill = ChkUseGlobalForConstantFill.IsChecked == true,
+            EnablePerTileFillOverride = ChkEnablePerTileFillOverride.IsChecked == true,
+            SeamSmoothingSteps = (int)Math.Round(SldSeamSmoothingSteps.Value),
+            ExportLayout = RbExportCustomGrid.IsChecked == true ? 2 :
+                           RbExportSingleImage.IsChecked == true ? 1 : 0,
+            ExportGridSize = TxtNewExportGridSize.Text,
+            ResolutionPresetSetIndex = CmbExportResolutionPresetSet.SelectedIndex,
+            ExportWidth = TxtNewExportWidth.Text,
+            ExportHeight = TxtNewExportHeight.Text,
+            LockExportAspectRatio = ChkLockExportAspectRatio.IsChecked == true,
+            ExportFileFormatIndex = CmbExportFileFormat.SelectedIndex,
+            ExportFolder = TxtExportFolder.Text,
+            ExportStandardXyNaming = ChkExportStandardXyNaming.IsChecked == true,
+            ExportPrefix = TxtExportPrefix.Text,
+            ExportSuffix = TxtExportSuffix.Text
+        };
+
+        UserSettingsService.Save(settings);
     }
 
     private void LoadLicenseTooltipText()
@@ -288,7 +419,6 @@ public partial class MainWindow : Window
             }
 
             TiffDemReader.ArrangeTilesInGrid(_tiles);
-            SyncGridDimensionsBoxes();
             await RunProcessingPipelineAsync();
             TxtStatusBar.Text = $"Removed {tileToRemove.FileName}. Recalculated global elevation range across {_tiles.Count} tile(s).";
         }
@@ -501,7 +631,6 @@ public partial class MainWindow : Window
             }
 
             TiffDemReader.ArrangeTilesInGrid(_tiles);
-            SyncGridDimensionsBoxes();
 
             await RunProcessingPipelineCoreAsync(token);
 
@@ -827,10 +956,6 @@ public partial class MainWindow : Window
         if (_isInitializing) return;
         HighlightSelectedResolutionButton();
         UpdateExpectedOutputFilesList();
-    }
-
-    private void SyncGridDimensionsBoxes()
-    {
     }
 
     /// <summary>
@@ -2039,7 +2164,6 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(new Action(async () =>
         {
-            SyncGridDimensionsBoxes();
             UpdateGlobalStatsDisplay();
             RebuildMosaicGrid();
             if (RbView3D?.IsChecked == true && _tiles.Count > 0)
