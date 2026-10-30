@@ -1,0 +1,60 @@
+﻿PROPRIETARY SOFTWARE LICENSE
+
+Copyright (c) 2026 Sipp Studio. All Rights Reserved.
+
+1. Ownership
+
+This software, including its source code, compiled binaries, algorithms, user interface, documentation, and associated original assets (collectively, the "Software"), is the exclusive property of Sipp Studio ("the Owner"), except for third-party components subject to their own license terms.
+All rights not expressly granted under this License are reserved by the Owner.
+
+2. Grant of License
+
+Subject to the terms of this License, the Owner may grant individual users a limited, non-exclusive, non-transferable, revocable license to use the Software for personal or commercial purposes, as expressly authorized by the Owner.
+No ownership rights or intellectual property rights are transferred to the user.
+
+3. Restrictions
+
+Unless expressly authorized in writing by the Owner, users may not:
+Copy, reproduce, redistribute, sublicense, or republish the Software or any substantial portion of it.
+Modify, adapt, translate, or create derivative works based on the Software.
+Reverse engineer, decompile, or disassemble the Software, except to the extent such restrictions are prohibited by applicable law.
+Sell, rent, lease, sublicense, or otherwise commercially distribute the Software.
+Remove or alter copyright notices, proprietary notices, or other ownership markings.
+Claim ownership of the Software or represent it as their own work.
+
+4. Source Code and Contributions
+
+The Software's source code is proprietary and may not be published, shared, or redistributed without the Owner's prior written permission.
+No contribution, modification, or submission by a third party transfers ownership of the Owner's existing intellectual property. Any separately contributed material remains subject to applicable law and any agreement between the parties.
+
+5. Intellectual Property
+All rights, title, and interest in the Software remain with the Owner, subject to applicable third-party rights.
+This License does not grant any rights to the Owner's trademarks, branding, or other intellectual property beyond those expressly stated herein.
+
+6. Termination
+
+This License terminates automatically if a user materially violates its terms. Upon termination, the user must cease all use of the Software and destroy copies in their possession or control, to the extent required by applicable law.
+Termination does not limit any other remedies available to the Owner under applicable law.
+
+7. Disclaimer of Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+THE OWNER DOES NOT WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE, UNINTERRUPTED, OR SUITABLE FOR ANY PARTICULAR APPLICATION.
+
+8. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE OWNER SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES, OR FOR ANY LOSS OF DATA, PROFITS, OR BUSINESS ARISING FROM THE USE OF OR INABILITY TO USE THE SOFTWARE.
+Nothing in this License excludes or limits liability where such exclusion or limitation is prohibited by applicable law.
+
+9. Amendments and Governing Law
+
+The Owner reserves the right to update the terms under which future versions of the Software are distributed.
+This License shall be governed by the laws of the Commonwealth of Virginia, without regard to its conflict-of-law principles, except where otherwise required by applicable law.
+
+10. Contact and Permissions
+
+Requests for permissions not expressly granted by this License, including redistribution, modification, commercial distribution, or other uses, must be submitted to the Owner at:
+james.sipp42@gmail.com
+All Rights Reserved.
+
+Unauthorized use, reproduction, or distribution of the Software may violate applicable intellectual property laws.
