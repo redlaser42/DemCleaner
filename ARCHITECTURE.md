@@ -1,31 +1,34 @@
 # ARCHITECTURE.md — Technical Reference for DEM Cleaner
 
-This document provides a comprehensive technical reference for the **DEM Cleaner** codebase as verified directly from the source files.
+This document provides a technical reference for the **DEM Cleaner** architecture, data structures, algorithms, and pipelines as verified from the repository source code.
 
 ---
 
 ## 1. Project Overview
 
-**DEM Cleaner** is a standalone Windows desktop utility built by Sipp Studio for GIS and 3D terrain workflows (including Unreal Engine Landscape, Unity Terrain, and Gaea). It ingests single or tiled Digital Elevation Model (DEM) GeoTIFF files, detects and repairs missing/void elevation data, smooths seams across adjacent tiles, previews the resulting mosaic in 2D and hardware-accelerated 3D, and exports cropped/resampled elevation datasets as 16-bit normalized PNGs or 16-bit/32-bit GeoTIFFs.
+**DEM Cleaner** is a Windows desktop application built by Sipp Studio for GIS and 3D terrain pipelines (such as Unreal Engine Landscape, Unity Terrain, and Gaea). It ingests single or tiled Digital Elevation Model (DEM) GeoTIFF files, detects and repairs missing/void elevation data, smooths seams across adjacent tiles, previews the resulting mosaic in 2D and hardware-accelerated 3D, and exports cropped/resampled elevation datasets as 16-bit normalized PNGs, 16-bit normalized GeoTIFFs, or 32-bit floating-point GeoTIFFs.
 
-### Development Status Summary
-- **Verified Implemented**: Multi-file/folder TIFF import (scanline & tiled), GeoTIFF/GDAL tag parsing and writing, automatic 2D grid arrangement (USGS 1m, `x/y`, `r/c`, GeoTIFF tiepoints, alphabetical fallback), void detection & 4 fill algorithms (Minimum, Maximum, Mean, Wavefront + SOR Laplace Interpolation), per-tile fill overrides, 3-pass inter-tile seam smoothing, interactive 2D mosaic viewport with zoom/pan and square export region gizmo, Before/After tile inspector, GPU 3D heightmap visualizer (1K–16K, 4 color palettes, water shader, wireframe, Z-scale, sun angle), expected output file table, multi-format/multi-layout bilinear export, 6 dynamic color themes, and Google Earth / Google Maps coordinate launch.
-- **Inferred / Partial / Remnant Elements**:
-  - [`MainWindow.SyncGridDimensionsBoxes()`](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs#L832-L834) is an empty method body called after grid arrangement and DataGrid cell edits—inferred to be a leftover hook from an earlier manual grid-dimension UI.
-  - [`App.RunSelfTest()`](file:///C:/Users/redla/repositories/DEM%20Cleaner/App.xaml.cs#L26-L45) implements a minimal smoke check (`FillMethod.Minimum` default and theme count) triggered via `--self-test`.
-  - [icon.ico](file:///C:/Users/redla/repositories/DEM%20Cleaner/icon.ico) and [icon3.ico](file:///C:/Users/redla/repositories/DEM%20Cleaner/icon3.ico) exist in the repository root alongside the active [icon2.ico](file:///C:/Users/redla/repositories/DEM%20Cleaner/icon2.ico) referenced by [DemCleaner.csproj](file:///C:/Users/redla/repositories/DEM%20Cleaner/DemCleaner.csproj#L9-L13).
+### Verified Capabilities
+- **TIFF Decoding**: Scanline and tiled TIFFs; 8/16/32/64-bit integer and IEEE float samples via managed LibTiff.
+- **Metadata Extraction**: Reads and parses `GDAL_NODATA` (`42113`), `ModelPixelScaleTag` (`33550`), `ModelTiepointTag` (`33922`), `GeoKeyDirectoryTag` (`34735`), and `GeoAsciiParamsTag` (`34737`).
+- **Tile Grid Arrangement**: Automatic placement using USGS 1m filename patterns (`USGS_1M_10_x56y475`), generic `x/y` or `r/c` filename coordinates, GeoTIFF tiepoints, or near-square alphabetical fallback.
+- **Void Detection & Filling**: Identifies voids via sentinel floats ($\le -1e30$), `NaN`/`Infinity`, GDAL tag, or custom thresholds. Fills voids via Minimum, Maximum, Mean, or Wavefront seeding + Gauss-Seidel SOR Laplace relaxation.
+- **Seam Smoothing**: Multi-pass cross-boundary smoothing (tangential 1D box filter + smoothstep jump feathering + C1 cross-boundary Laplacian relaxation).
+- **Interactive Viewports**: 2D mosaic viewport (zoom, pan, square crop area selection, translation gizmo, metric scale bar) and Before/After tile inspector.
+- **3D GPU Heightmap Visualizer**: Hardware-accelerated WPF `Viewport3D` with 1K–16K resolution tiers, 4 color palettes, flat-water shading, quad wireframe, sun azimuth lighting, and automatic/manual Z-scale.
+- **Bilinear Resampling & Export**: Exports merged single images, source grids, or custom $N \times N$ layouts to 16-bit PNG, 32-bit float GeoTIFF, or 16-bit GeoTIFF with game-engine resolution presets.
 
 ---
 
 ## 2. Technology Stack
 
-| Layer | Technology / Library | Details |
+| Component | Technology | Role & Notes |
 | :--- | :--- | :--- |
-| **Runtime & SDK** | `.NET 8.0` (`net8.0-windows`) | C# 12, `<Nullable>enable</Nullable>`, `<ImplicitUsings>enable</ImplicitUsings>` |
-| **UI Framework** | Windows Presentation Foundation (`WPF`) | XAML custom control templates, `DynamicResource` theming, `Viewport3D` (Direct3D 9 interop) |
-| **TIFF / GeoTIFF I/O** | `BitMiracle.LibTiff.NET` (`2.4.660`) | Pure managed LibTiff port (`BitMiracle.LibTiff.Classic`) with custom tag extender |
-| **PNG Imaging** | `System.Windows.Media.Imaging` | `PngBitmapEncoder` with `PixelFormats.Gray16` (`ushort[]`) |
-| **Concurrency** | `Task.Run` + `Parallel.For` + `CancellationTokenSource` | Background compute pipelines with thread-throttled parallel loops |
+| **Runtime & Language** | C# 12 / .NET 8.0 (`net8.0-windows`) | `<Nullable>enable</Nullable>`, `<ImplicitUsings>enable</ImplicitUsings>` |
+| **UI Framework** | Windows Presentation Foundation (WPF) | Dynamic resource theming, custom templates, Direct3D 9 interop via `Viewport3D` |
+| **TIFF Engine** | `BitMiracle.LibTiff.NET` (2.4.660) | Managed LibTiff implementation (`BitMiracle.LibTiff.Classic`) with custom tag extender |
+| **PNG Encoding** | `System.Windows.Media.Imaging` | `PngBitmapEncoder` with `PixelFormats.Gray16` (`ushort[]` buffer) |
+| **Concurrency** | `Task.Run` + `Parallel.For` | Background worker pipelines throttled to `ProcessorCount / 2` to preserve UI responsiveness |
 
 ---
 
@@ -33,27 +36,25 @@ This document provides a comprehensive technical reference for the **DEM Cleaner
 
 ```text
 DEM Cleaner/
-├── App.xaml                        # WPF Application definition (StartupUri="MainWindow.xaml")
-├── App.xaml.cs                     # Application startup & "--self-test" CLI mode handler
-├── AssemblyInfo.cs                 # WPF ThemeInfo assembly attribute
-├── DemCleaner.csproj               # .NET 8 WPF project file, LibTiff package ref, Debug PostBuild hook
-├── DemCleaner.slnx                 # XML-format Visual Studio solution file
-├── LICENSE.txt                     # Sipp Studio proprietary license (copied to output directory)
-├── MainWindow.xaml                 # Primary UI layout, custom control styles, 2D/3D viewports (1,463 lines)
-├── MainWindow.xaml.cs              # UI state, event handlers, 2D overlay gizmo, 3D camera & pipelines (3,556 lines)
-├── icon2.ico                       # Active application icon (icon.ico and icon3.ico are unused)
+├── App.xaml / App.xaml.cs          # Application startup and headless --self-test CLI runner
+├── AssemblyInfo.cs                 # WPF ThemeInfo configuration
+├── DemCleaner.csproj               # .NET 8 WPF project file with Debug PostBuild launch hook
+├── DemCleaner.slnx                 # Solution file
+├── LICENSE.txt                     # Proprietary software license (copied to build output)
+├── MainWindow.xaml / .cs           # Primary window: UI layout, viewport canvas, 3D camera, pipelines
+├── images/                         # Application icon (icon2.ico) and documentation preview screenshots
 ├── Models/
-│   └── DemTile.cs                  # DemTile (INotifyPropertyChanged), DemProcessingOptions, ExpectedOutputFileItem, enums
+│   └── DemTile.cs                  # DemTile, DemProcessingOptions, ExpectedOutputFileItem, enums
 └── Services/
-    ├── DemProcessor.cs             # Void detection/fill, seam smoothing, virtual mosaic, 3D builder, exporters (1,877 lines)
-    ├── ThemeManager.cs             # AppThemePalette record and 6 runtime color themes
-    ├── TiffDemReader.cs            # TIFF/GeoTIFF reader, custom tag extender, filename parser, grid arranger
-    └── UtmCoordinateConverter.cs   # WGS84/NAD83 UTM-to-LatLon math and EPSG PCS code parser
+    ├── DemProcessor.cs             # Stateless computational engine: void fill, smoothing, export, 3D
+    ├── ThemeManager.cs             # AppThemePalette definition and 6 runtime color schemes
+    ├── TiffDemReader.cs            # TIFF decoding, GeoTIFF tag extender, filename coordinate parsing
+    └── UtmCoordinateConverter.cs   # WGS84/NAD83 UTM coordinate math and EPSG PCS code parsing
 ```
 
 ---
 
-## 4. Major Components & Relationships
+## 4. Major Components & Responsibilities
 
 ```mermaid
 classDiagram
@@ -127,143 +128,140 @@ classDiagram
 
     App --> MainWindow : launches
     MainWindow --> DemTile : manages collection
-    MainWindow --> DemProcessingOptions : builds from UI
-    MainWindow --> TiffDemReader : imports & arranges tiles
-    MainWindow --> DemProcessor : processes, renders & exports
-    MainWindow --> ThemeManager : switches palettes
+    MainWindow --> DemProcessingOptions : constructs from UI
+    MainWindow --> TiffDemReader : loads & arranges
+    MainWindow --> DemProcessor : delegates compute
+    MainWindow --> ThemeManager : applies palettes
     TiffDemReader --> DemTile : instantiates
-    TiffDemReader --> UtmCoordinateConverter : converts UTM/EPSG
-    DemProcessor --> DemTile : reads/mutates elevation buffers
+    TiffDemReader --> UtmCoordinateConverter : resolves coordinates
+    DemProcessor --> DemTile : reads & mutates buffers
 ```
 
-### Component Responsibilities
-
-1. **[`MainWindow`](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs)**:
-   - Owns the observable `_tiles` and `_expectedOutputs` collections bound to `DgTiles` and `DgExpectedOutputs`.
-   - Manages interactive 2D viewport state: mouse-wheel zoom (`ScaleGridMosaic`, $1\times$ to $10\times$), right/middle-drag pan, left-drag custom 1:1 square export region (`_exportNormX0..Y1`), center translation gizmo (`RenderTransformGizmo`), and double-click tile inspection.
-   - Manages 3D viewport camera state (`_camYawDeg`, `_camPitchDeg`, `_camDistance`, `_camTarget`), sun azimuth lighting (`Light3DMain`), and automatic or manual Z-scale (`Scale3DTerrain.ScaleY`).
-   - Coordinates asynchronous background tasks via `_cts` (tile import, void fill, seam smoothing, file export) and `_cts3D` (3D mesh/texture generation).
-
-2. **[`DemTile`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Models/DemTile.cs#L44-L227)**:
-   - Implements `INotifyPropertyChanged` for live WPF `DataGrid` updates (`GridRow`, `GridCol`, `FillOverride`, `VoidPixelCount`, `VoidPercentage`, `MinElevation`, `MaxElevation`, `ElevationRange`, `Status`, `RawThumbnail`, `ProcessedThumbnail`).
-   - Holds three distinct pixel buffers in row-major order (`Height * Width`):
-     - `RawData`: Original elevation samples decoded from the TIFF.
-     - `BaseFilledData`: Elevation values after void filling, prior to inter-tile seam smoothing.
-     - `FilledData`: Final processed elevation values after inter-tile seam smoothing.
-   - Holds `VoidMask` (`bool[]`) where `true` marks NoData/void pixels.
-
-3. **[`TiffDemReader`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/TiffDemReader.cs)**:
-   - Registers custom GeoTIFF tags via `Tiff.SetTagExtender(TagExtender)` in its static constructor.
-   - Reads both scanline (`ReadScanlineTiff`) and tiled (`ReadTiledTiff`) TIFFs across `IEEEFP` (32/64-bit), `INT` (8/16/32-bit), and `UINT` (8/16/32-bit) sample formats.
-   - Extracts `GDAL_NODATA` (`42113`), `ModelPixelScaleTag` (`33550`), `ModelTiepointTag` (`33922`), `GeoKeyDirectoryTag` (`34735`, specifically `ProjectedCSTypeGeoKey = 3072`), and `GeoAsciiParamsTag` (`34737`).
-   - Parses filename coordinates using 3 compiled regular expressions: `UsgsPattern` (`USGS_1M_10_x56y475`), `ExplicitXyPattern` (`x56y475`), and `ExplicitRowColPattern` (`r0_c1` or `y475_x56`).
-   - [`ArrangeTilesInGrid`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/TiffDemReader.cs#L392-L453) assigns `GridRow` and `GridCol` using a 3-tier priority:
-     1. Parsed filename X/Y coordinates (inverting Y for geographic northward coordinates vs. downward `r0_c1` indices).
-     2. Distinct GeoTIFF `ModelTiepointTag` X/Y origins (North = row 0).
-     3. Alphabetical filename sort into a near-square $\lceil\sqrt{N}\rceil$ grid.
-
-4. **[`DemProcessor`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs)**:
-   - Stateless static compute engine operating on `DemTile` instances and `MosaicDescriptor`.
-
-5. **[`UtmCoordinateConverter`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/UtmCoordinateConverter.cs)**:
-   - Converts UTM Easting/Northing meters to WGS84 Latitude/Longitude decimal degrees using series expansion (`WGS84_A = 6378137.0`, `K0 = 0.9996`) and resolves EPSG codes (`26901..26923` NAD83, `6330..6348` NAD83(2011), `32601..32660` WGS84 North, `32701..32760` WGS84 South).
-
-6. **[`ThemeManager`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/ThemeManager.cs)**:
-   - Provides 6 `AppThemePalette` records (`Sage & Sandstone`, `Topo Buckskin & Olive`, `Canyon & Pine`, `Forest Canopy`, `Desert Mesa`, `Midnight Slate`) and mutates `Window.Resources` with frozen `SolidColorBrush` instances.
+### Component Details
+1. **[MainWindow.xaml.cs](MainWindow.xaml.cs)**: Main UI controller. Manages UI event routing, 2D viewport pan/zoom transforms, custom square crop gizmo interactions, 3D orbit/pan camera math, and async task orchestration via `_cts` and `_cts3D`.
+2. **[Models/DemTile.cs](Models/DemTile.cs)**: Data carrier implementing `INotifyPropertyChanged`. Contains tile dimensions, geographic metadata, and the three distinct elevation buffers (`RawData`, `BaseFilledData`, `FilledData`).
+3. **[Services/TiffDemReader.cs](Services/TiffDemReader.cs)**: Decodes scanline and tiled TIFFs into row-major float arrays. Implements `TagExtender` for custom GeoTIFF/GDAL tags. Arranges tiles by filename coordinates, tiepoints, or near-square alphabetical order.
+4. **[Services/DemProcessor.cs](Services/DemProcessor.cs)**: Pure static compute engine. Performs statistical analysis, void filling, seam smoothing, virtual mosaic indexing, bilinear resampling, preview bitmap rendering, 3D mesh/texture generation, and file export.
+5. **[Services/UtmCoordinateConverter.cs](Services/UtmCoordinateConverter.cs)**: Provides closed-form UTM Easting/Northing to WGS84 Latitude/Longitude conversion using ellipsoidal series expansion and maps EPSG PCS codes.
+6. **[Services/ThemeManager.cs](Services/ThemeManager.cs)**: Supplies 6 color palette records and mutates `Window.Resources` dynamically with frozen `SolidColorBrush` instances.
 
 ---
 
-## 5. Data Flow & Processing Pipelines
+## 5. Data Flow & Algorithmic Pipelines
 
 ```mermaid
 flowchart TD
-    A["Import .tif / .tiff Files or Folder"] --> B["TiffDemReader.LoadTile (Background Task)"]
+    A["Import .tif / .tiff Files or Folder"] --> B["TiffDemReader.LoadTile (Worker Thread)"]
     B --> C["TiffDemReader.ArrangeTilesInGrid"]
-    C --> D["DemProcessor.AnalyzeTiles (Global/Tile Min, Max, Mean & VoidMask)"]
-    D --> E["DemProcessor.FillTileVoids (Min / Max / Mean / Wavefront + SOR Laplace)"]
+    C --> D["DemProcessor.AnalyzeTiles (Min/Max/Mean & VoidMask)"]
+    D --> E["DemProcessor.FillTileVoids (Per-Tile or Global Fill)"]
     E --> F["Store DemTile.BaseFilledData"]
-    F --> G["DemProcessor.ApplyTileSeamSmoothing (C0 Feather + C1 Laplacian)"]
-    G --> H["Store DemTile.FilledData & RenderPreviewBitmap (Frozen BGRA32)"]
-    H --> I["Update UI: 2D Mosaic Grid, Tile Inspector, Expected Outputs"]
-    I --> J{"3D Tab Active?"}
+    F --> G["DemProcessor.ApplyTileSeamSmoothing"]
+    G --> H["Store DemTile.FilledData & Render Preview Bitmaps"]
+    H --> I["Update UI: 2D Mosaic, Tile Inspector, Expected Outputs"]
+    I --> J{"3D Visualizer Active?"}
     J -- Yes --> K["DemProcessor.Build3DHeightmapAssets (Throttled Parallel.For)"]
-    K --> L["Upload Frozen WriteableBitmap + MeshGeometry3D to Viewport3D"]
+    K --> L["Freeze & Assign WriteableBitmap + MeshGeometry3D to Viewport3D"]
     I --> M["User Clicks EXPORT FILES"]
-    M --> N["BuildMosaicDescriptor & Loop Output Grid [r, c]"]
-    N --> O["DemProcessor.ExtractResampledSubTile (Bilinear Interpolation)"]
-    O --> P["ExportNormalized16BitPng / ExportFloat32GeoTiff / ExportNormalized16BitTiff"]
+    M --> N["Build MosaicDescriptor & Iterate Grid Sub-Tiles"]
+    N --> O["DemProcessor.ExtractResampledSubTile (Bilinear Resampling)"]
+    O --> P["Write 16-Bit PNG / 32-Bit GeoTIFF / 16-Bit GeoTIFF to Disk"]
 ```
 
-### Key Algorithmic Pipelines in `DemProcessor`
+### 1. Void Pixel Analysis (`AnalyzeTiles`)
+- Computes per-tile and dataset-wide valid elevation statistics (`Min`, `Max`, `Mean`).
+- Populates `DemTile.VoidMask` (`bool[]`) using `IsVoidPixel`:
+  - Values matching `NaN`, `Infinity`, or sentinel extrema ($\le -1e30f$ or $\ge 1e30f$).
+  - GDAL NoData tag match within tolerance: $\text{tol} = \max(1e-4, |\text{NoData}| \times 1e-5)$.
+  - Custom threshold comparison (`<=`, `==`, `>=`).
 
-1. **Void Pixel Detection ([`IsVoidPixel`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L60-L88))**:
-   A pixel is flagged as void (`VoidMask[i] = true`) if:
-   - `float.IsNaN(value)` or `float.IsInfinity(value)`
-   - `value <= -1e30f` or `value >= 1e30f` (standard GIS float sentinel such as `-3.4028235e+38`)
-   - `UseGdalNoDataTag` is enabled and `|value - GdalNoDataValue| <= max(1e-4, |GdalNoDataValue| * 1e-5)`
-   - `UseCustomThreshold` is enabled and `value` matches `CustomNoDataValue` under `<=`, `==` ($\pm 10^{-4}$), or `>=`.
+### 2. Void Filling (`FillTileVoids`)
+- **Constant Modes (Minimum, Maximum, Mean)**: Replaces void pixels with either the per-tile statistic or the global dataset statistic (`FillUsingGlobalStats`).
+- **Wavefront + SOR Laplace Interpolation (`InterpolateVoidsInPlace`)**:
+  - *Pass 1 (Wavefront Propagation)*: Inward 8-neighbor distance-weighted propagation from valid borders initializes void pixels across arbitrary gap sizes.
+  - *Pass 2 (Gauss-Seidel SOR Laplace)*: Successive Over-Relaxation ($\omega = 1.45$) relaxes void pixels until maximum delta falls below $1e-4f$ or iteration limit is reached.
+- Result is saved to both `BaseFilledData` and `FilledData`.
 
-2. **Void Filling ([`FillTileVoids`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L169-L256) & [`InterpolateVoidsInPlace`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L556-L686))**:
-   - **Constant Fill (`Minimum`, `Maximum`, `Mean`)**: Replaces void pixels with either the per-tile statistic or the global dataset statistic (`FillUsingGlobalStats`).
-   - **Interpolated Fill**:
-     - *Stage 1 (Wavefront Seeding)*: Propagates known boundary elevations inward into unresolved void pixels using 8-neighbor inverse-distance weights ($1.0$ cardinal, $0.7071$ diagonal) until all connected void pixels are initialized (isolated voids fallback to `tile.MeanElevation`).
-     - *Stage 2 (Gauss-Seidel SOR Laplace Relaxation)*: Runs `Math.Clamp(iterations, 10, 1000)` passes over void indices using Successive Over-Relaxation ($\omega = 1.45$) with early convergence exit when `maxDelta < 1e-4f`.
+### 3. Inter-Tile Seam Smoothing (`ApplyTileSeamSmoothing`)
+- Always restores `FilledData` from `BaseFilledData` before processing, ensuring idempotent and repeatable smoothing.
+- *Pass 1 & 2 (C0 Step Feathering)*: Evaluates edge elevation differences across vertical and horizontal seams, filters differences tangentially with a 1D box filter (`Smooth1DArray`), and applies smoothstep falloff $t^2(3 - 2t)$ across boundary bands.
+- *Pass 3 (C1 Laplacian Relaxation)*: Performs iterative 4-neighbor cross-boundary relaxation across vertical and horizontal seams for tiles with matching dimensions.
 
-3. **Inter-Tile Seam Smoothing ([`ApplyTileSeamSmoothing`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L262-L497))**:
-   - Restores `FilledData` from `BaseFilledData` before applying smoothing.
-   - *Pass 1 (Vertical Seams)* & *Pass 2 (Horizontal Seams)*: Computes boundary difference along shared edges, box-smooths the 1D difference array tangentially (`Smooth1DArray`), and feathers $\pm 0.5 \cdot \Delta$ inward across a `bandWidth = Math.Clamp(smoothingSteps * 3, 2, 64)` pixel band using cubic smoothstep falloff $t^2(3 - 2t)$.
-   - *Pass 3 (Cross-Boundary C1 Laplacian Relaxation)*: Runs `Math.Clamp(smoothingSteps, 1, 25)` passes across a neighborhood of radius `Math.Clamp(smoothingSteps + 2, 2, 28)` across shared vertical and horizontal borders (requires adjacent tiles to have matching dimensions).
+### 4. Virtual Mosaic & Bilinear Resampling (`ExtractResampledSubTile`)
+- `MosaicDescriptor` maps multi-tile grids without allocating a monolithic composite buffer in RAM.
+- Maps continuous sub-tile normalized coordinates $[0..1]$ to source mosaic space and samples elevations via bilinear interpolation between adjacent pixel centers.
 
-4. **Virtual Mosaic & Bilinear Resampling ([`BuildMosaicDescriptor`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L893-L1002) & [`ExtractResampledSubTile`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L1105-L1155))**:
-   - Rather than allocating a stitched array of all tiles in memory, `MosaicDescriptor` records column widths/offsets, row heights/offsets, a 2D `DemTile?[rows, cols]` lookup table, and top-left geographic origin/scale.
-   - `ExtractResampledSubTile` maps normalized sub-region coordinates `[subNormX0..subNormX1, subNormY0..subNormY1]` to target `(outWidth, outHeight)` pixel centers using bilinear interpolation across `SampleMosaicPixel`.
-
-5. **3D GPU Heightmap Generation ([`Build3DHeightmapAssets`](file:///C:/Users/redla/repositories/DEM%20Cleaner/Services/DemProcessor.cs#L1238-L1609))**:
-   - Maps the 5 UI resolution tiers to distinct texture dimensions and mesh subdivisions:
-     - `1K (1024)`: $1024^2$ texture, $64 \times 64$ mesh ($4{,}096$ quads)
-     - `2K (2048)`: $2048^2$ texture, $128 \times 128$ mesh ($16{,}384$ quads)
-     - `4K (4096)`: $4096^2$ texture, $256 \times 256$ mesh ($65{,}536$ quads)
-     - `8K (8192)`: $8192^2$ texture, $512 \times 512$ mesh ($262{,}144$ quads)
-     - `16K (16384)`: $8192^2$ texture (Direct3D 9 hardware texture limit) with $1/16384$ sub-pixel bilinear micro-normal sampling, $1024 \times 1024$ mesh ($1{,}048{,}576$ quads)
-   - Shades terrain using `EvaluateTerrainColorRamp` (`Hypsometric`, `Grayscale`, `Alpine`, `Desert`), optional multi-ring neighborhood flat-water detection, and optional quad wireframe lines, then builds a solid pedestal skirt (`BuildTerrainSkirtMesh`).
-
----
-
-## 6. Application Lifecycle, Configuration & Persistence
-
-- **Startup**: `App.OnStartup` checks command-line arguments for `--self-test`. If absent, WPF opens `MainWindow.xaml`.
-- **`MainWindow` Initialization**:
-  1. Binds `DgTiles` and `DgExpectedOutputs`.
-  2. Sets default export folder to `<BaseDirectory>\ExportedPngs` (or `<FirstTileDirectory>\Exported_16Bit_PNG` if the box is cleared before first import).
-  3. Populates `ThemeManager.Themes` and applies index `0` (`Sage & Sandstone`).
-  4. Loads [LICENSE.txt](file:///C:/Users/redla/repositories/DEM%20Cleaner/LICENSE.txt) into the header tooltip (`LoadLicenseTooltipText`).
-  5. Initializes export resolution preset buttons, 3D camera transform, and sun light vector, then sets `_isInitializing = false`.
-- **Persistence**:
-  - **No user configuration persistence is implemented**. All UI settings (theme, map provider, void detection rules, fill mode, export path) reset to defaults on restart.
+### 5. 3D GPU Heightmap Generation (`Build3DHeightmapAssets`)
+- Generates a shaded albedo texture (`WriteableBitmap`) and displaced terrain geometry (`MeshGeometry3D`) with a geological base skirt.
+- Scales normal strength and mesh tessellation with resolution tier:
+  - 1K: 4,096 quads ($64 \times 64$)
+  - 2K: 16,384 quads ($128 \times 128$)
+  - 4K: 65,536 quads ($256 \times 256$)
+  - 8K: 262,144 quads ($512 \times 512$)
+  - 16K: 1,048,576 quads ($1024 \times 1024$), texture capped at $8192 \times 8192$ (Direct3D 9 hardware limit) with $1/16384$ sub-pixel micro-normal sampling.
+- All generated WPF 3D assets are frozen (`.Freeze()`) before returning to the UI thread.
 
 ---
 
-## 7. Build, Execution & Testing Architecture
+## 6. Architectural Invariants
 
-- **Build Process**: Standard MSBuild / `.NET SDK` (`Microsoft.NET.Sdk` with `UseWPF=true`).
-  - [LICENSE.txt](file:///C:/Users/redla/repositories/DEM%20Cleaner/LICENSE.txt) is copied to the output directory (`PreserveNewest`).
-  - **PostBuild Hook**: In `Debug` configuration, [DemCleaner.csproj](file:///C:/Users/redla/repositories/DEM%20Cleaner/DemCleaner.csproj#L23-L25) runs `start "" "$(TargetPath)"`, automatically launching the application after every Debug build.
-- **Testing Architecture**:
-  - No separate unit test project exists in the solution.
-  - [App.xaml.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/App.xaml.cs#L16-L44) provides an in-app CLI smoke test invoked via `DemCleaner.exe --self-test`, writing `selftest_result.txt` to `AppDomain.CurrentDomain.BaseDirectory`.
+The following conditions are verified design guarantees that must be maintained:
+
+1. **Elevation Buffer Separation**:
+   - `RawData` is immutable after initial load.
+   - `BaseFilledData` represents void-filled elevations *prior* to inter-tile seam smoothing.
+   - `FilledData` holds active elevations *after* seam smoothing. `ApplyTileSeamSmoothing` must always begin by resetting `FilledData` from `BaseFilledData`.
+2. **Virtual Mosaic Indexing**:
+   - Multi-tile processing and export must remain virtualized through `MosaicDescriptor`. Full-mosaic allocations in RAM are prohibited.
+3. **Coordinate Transformation Accuracy**:
+   - Geographic coordinates must follow WGS84 conventions. When arranging grids by geographic Y coordinates (e.g., USGS northing), larger Y values represent North and must map to row index 0 (top of the grid).
+4. **GeoTIFF Tag Registration**:
+   - Custom tags must be registered via `TiffDemReader.EnsureTagsRegistered()` prior to opening any TIFF handle.
+5. **Preview & Export Symmetry**:
+   - The file list, grid coordinates, dimensions, and naming produced in `MainWindow.UpdateExpectedOutputFilesList` must remain identical to the actual files emitted by `MainWindow.ExportCustomAreaSetAsync`.
+6. **Thread Affinity & Freezable Immutability**:
+   - Any `Freezable` created on a background worker thread and dispatched to the UI must be frozen using `.Freeze()`. Objects must only be frozen when no subsequent mutation is required.
+7. **Independent Cancellation Lifecycles**:
+   - Main compute pipelines (`_cts`) and 3D preview builds (`_cts3D`) must operate on independent cancellation tokens to prevent 3D parameter adjustments from cancelling ongoing file exports or void-filling tasks.
+8. **Asynchronous State Consistency**:
+   - Cancellation must leave the application in a consistent, non-busy state (`SetBusy(false)`), preserving loaded tiles without corrupting buffers.
 
 ---
 
-## 8. Known Technical Limitations & Architectural Decisions
+## 7. Architectural Risks & Technical Debt
 
-1. **Monolithic UI Controller ([MainWindow.xaml.cs](file:///C:/Users/redla/repositories/DEM%20Cleaner/MainWindow.xaml.cs))**:
-   - At 3,556 lines, `MainWindow.xaml.cs` combines view logic, 2D canvas drawing, 3D camera math, scale bar formatting, and export orchestration. Future refactoring should avoid growing this file further when logic can be placed in `Services/`.
-2. **In-Memory Elevation Buffers**:
-   - Each `DemTile` keeps `RawData` (`float[]`), `BaseFilledData` (`float[]`), `FilledData` (`float[]`), and `VoidMask` (`bool[]`) in RAM simultaneously (~13 bytes/pixel). Loading many high-resolution tiles (e.g., dozens of $10{,}000 \times 10{,}000$ USGS 1m tiles) can consume several gigabytes of memory.
-3. **1:1 Square Constraint on Custom Export Areas**:
-   - Interactive drag selection (`ApplyDragPointsToExportArea`) and `UpdateExportAreaMetricsAndUi` (`int sidePx = Math.Min(_exportAreaStats.PixelWidth, _exportAreaStats.PixelHeight)`) enforce a 1:1 square pixel aspect ratio whenever `IsCustomExportAreaActive` is `true` (designed for square game-engine heightmaps).
-4. **Seam Smoothing Pass 3 Tile Size Constraint**:
-   - While Passes 1 and 2 of `ApplyTileSeamSmoothing` resample across tiles of differing resolutions, Pass 3 (Laplacian C1 relaxation) only processes adjacent tile pairs where `Width` and `Height` are identical.
-5. **Direct3D 9 Texture Limit in WPF `Viewport3D`**:
-   - WPF's `Viewport3D` uses Direct3D 9 under the hood, which caps hardware texture dimensions at $8192 \times 8192$. In `16K` 3D mode, `Build3DHeightmapAssets` uses an $8192 \times 8192$ `WriteableBitmap` combined with $1/16384$ sub-pixel normal sampling and a $1024 \times 1024$ vertex mesh.
+1. **Monolithic UI Controller**:
+   - [MainWindow.xaml.cs](MainWindow.xaml.cs) acts as a central coordinator combining UI interactions, 2D canvas overlay drawing, 3D camera transforms, and background workflow dispatching.
+   - *Impact*: High regression risk when modifying unrelated features.
+   - *Recommendation*: Incrementally extract domain responsibilities (such as export coordination and 2D overlay rendering) into focused services.
+2. **In-Memory Elevation Buffer Footprint**:
+   - Each tile maintains `RawData` (`float[]`), `BaseFilledData` (`float[]`), `FilledData` (`float[]`), and `VoidMask` (`bool[]`) simultaneously in RAM (~13 bytes per pixel).
+   - *Impact*: Datasets containing dozens of $10{,}000 \times 10{,}000$ tiles can exceed system memory.
+   - *Recommendation*: Consider on-demand disk caching or discarding intermediate `BaseFilledData` when seam smoothing is disabled.
+3. **Absence of Automated Numerical Regression Tests**:
+   - The repository currently relies on manual GUI inspection and a minimal CLI smoke test (`--self-test`).
+   - *Impact*: Mathematical changes to interpolation, coordinate conversion, or seam smoothing cannot be automatically verified.
+   - *Recommendation*: Implement unit tests with small synthetic DEM arrays ($4 \times 4$ and $16 \times 16$) to validate numerical correctness.
+4. **Lack of Settings Persistence**:
+   - All user selections (themes, threshold values, export folders, resolution choices) are ephemeral and reset upon restarting the application.
+   - *Impact*: Minor usability friction.
+   - *Recommendation*: Introduce a lightweight local JSON settings provider.
+5. **Direct3D 9 Texture Hardware Cap**:
+   - WPF's `Viewport3D` is constrained by Direct3D 9 hardware limits, capping texture bitmaps to $8192 \times 8192$.
+   - *Impact*: The "16K" 3D preview tier renders geometry tessellated to 1,048,576 quads, but uses an 8K texture with sub-pixel sampling rather than a true 16K texture map.
+6. **Seam Smoothing Tile Dimension Constraint**:
+   - Pass 3 of `ApplyTileSeamSmoothing` (cross-boundary Laplacian relaxation) requires adjacent tiles to have identical width and height. Tiles with differing resolutions only receive Pass 1 and 2 step feathering.
+7. **Application Icon Path Discrepancy**:
+   - `DemCleaner.csproj` references `<ApplicationIcon>icon2.ico</ApplicationIcon>` and `<Content Include="icon2.ico" />` in the root directory, while `icon2.ico` is located in `images/icon2.ico`.
+   - *Impact*: Builds fail (`CS7064`) until the `.csproj` path is updated or the icon is copied to the root directory.
+   - *Recommendation*: Update `DemCleaner.csproj` to reference `images\icon2.ico`.
 
+---
+
+## 8. Incremental Refactoring Guidance
+
+When extending or cleaning the codebase:
+- **Avoid Wholesale Rewrites**: Do not attempt a full rewrite or force an MVVM framework into the project. The code-behind + static service pattern is established and functional.
+- **Isolate Computational Logic**: Place all new mathematical, GIS, or file I/O operations into `Services/` as pure static or injectable methods that do not depend on WPF UI controls.
+- **Extract Responsibilities Incrementally**: When modifying [MainWindow.xaml.cs](MainWindow.xaml.cs), look for opportunities to extract cohesive helper classes (e.g., `ExportCoordinator`, `ViewportCameraController`) with clear inputs and outputs.
+- **Verify Invariants**: Any architectural refactoring must be accompanied by build verification (`dotnet build -c Release`) and regression testing of tile loading, void filling, and export.
