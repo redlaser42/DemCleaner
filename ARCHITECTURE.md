@@ -49,6 +49,7 @@ DEM Cleaner/
     ├── DemProcessor.cs             # Stateless computational engine: void fill, smoothing, export, 3D
     ├── ThemeManager.cs             # AppThemePalette definition and 6 runtime color schemes
     ├── TiffDemReader.cs            # TIFF decoding, GeoTIFF tag extender, filename coordinate parsing
+    ├── UserSettingsService.cs      # User settings model and persistent JSON storage in %APPDATA%
     └── UtmCoordinateConverter.cs   # WGS84/NAD83 UTM coordinate math and EPSG PCS code parsing
 ```
 
@@ -238,23 +239,11 @@ The following conditions are verified design guarantees that must be maintained:
    - Each tile maintains `RawData` (`float[]`), `BaseFilledData` (`float[]`), `FilledData` (`float[]`), and `VoidMask` (`bool[]`) simultaneously in RAM (~13 bytes per pixel).
    - *Impact*: Datasets containing dozens of $10{,}000 \times 10{,}000$ tiles can exceed system memory.
    - *Recommendation*: Consider on-demand disk caching or discarding intermediate `BaseFilledData` when seam smoothing is disabled.
-3. **Absence of Automated Numerical Regression Tests**:
-   - The repository currently relies on manual GUI inspection and a minimal CLI smoke test (`--self-test`).
-   - *Impact*: Mathematical changes to interpolation, coordinate conversion, or seam smoothing cannot be automatically verified.
-   - *Recommendation*: Implement unit tests with small synthetic DEM arrays ($4 \times 4$ and $16 \times 16$) to validate numerical correctness.
-4. **Lack of Settings Persistence**:
-   - All user selections (themes, threshold values, export folders, resolution choices) are ephemeral and reset upon restarting the application.
-   - *Impact*: Minor usability friction.
-   - *Recommendation*: Introduce a lightweight local JSON settings provider.
-5. **Direct3D 9 Texture Hardware Cap**:
+3. **Direct3D 9 Texture Hardware Cap**:
    - WPF's `Viewport3D` is constrained by Direct3D 9 hardware limits, capping texture bitmaps to $8192 \times 8192$.
    - *Impact*: The "16K" 3D preview tier renders geometry tessellated to 1,048,576 quads, but uses an 8K texture with sub-pixel sampling rather than a true 16K texture map.
-6. **Seam Smoothing Tile Dimension Constraint**:
+4. **Seam Smoothing Tile Dimension Constraint**:
    - Pass 3 of `ApplyTileSeamSmoothing` (cross-boundary Laplacian relaxation) requires adjacent tiles to have identical width and height. Tiles with differing resolutions only receive Pass 1 and 2 step feathering.
-7. **Application Icon Path Discrepancy**:
-   - `DemCleaner.csproj` references `<ApplicationIcon>icon2.ico</ApplicationIcon>` and `<Content Include="icon2.ico" />` in the root directory, while `icon2.ico` is located in `images/icon2.ico`.
-   - *Impact*: Builds fail (`CS7064`) until the `.csproj` path is updated or the icon is copied to the root directory.
-   - *Recommendation*: Update `DemCleaner.csproj` to reference `images\icon2.ico`.
 
 ---
 

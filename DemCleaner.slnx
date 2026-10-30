@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="DemCleaner.csproj" />
+  <Project Path="DemCleaner.Tests/DemCleaner.Tests.csproj" />
 </Solution>

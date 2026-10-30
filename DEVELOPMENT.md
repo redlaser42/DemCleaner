@@ -63,7 +63,7 @@ At startup, `MainWindow.LoadLicenseTooltipText` locates [LICENSE.txt](LICENSE.tx
 | :--- | :--- | :--- | :--- |
 | **Compilation Verification** | Available | `dotnet build -c Release` | Confirms syntax, type safety, and zero compiler warnings. |
 | **CLI Smoke Test** | Available | `./bin/Release/net8.0-windows/DemCleaner.exe --self-test` | Headless check verifying `DemProcessingOptions.FillMethod == Minimum` and `ThemeManager.Themes.Count == 6`. **Does not test numerical algorithms, GeoTIFF I/O, or export.** |
-| **Automated Unit Tests** | None | Not yet implemented | No unit test project currently exists in the solution. |
+| **Automated Unit Tests** | Available | `dotnet test` or `./DemCleaner.Tests/bin/Release/net8.0-windows/DemCleaner.Tests.exe` | 10 unit tests in `DemCleaner.Tests` validating void detection, constant fill, Laplace interpolation, seam smoothing, bilinear resampling, and settings persistence. |
 | **Manual Functional Testing** | Available | Interactive GUI execution | Manual verification of file drop, 2D viewport, 3D visualizer, and export. |
 
 ### Recommended Numerical Regression Testing Strategy
