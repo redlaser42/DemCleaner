@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Media.Media3D;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -50,6 +51,16 @@ public partial class MainWindow : Window
     private bool _isMouseDownOnMosaic = false;
     private bool _isDraggingExportArea = false;
     private Point _mosaicDragStartPt;
+    private bool _isDraggingGizmo = false;
+    private Point _mosaicPanStartPt;
+    private double _mosaicPanStartHOffset;
+    private double _mosaicPanStartVOffset;
+    private bool _isPanningMosaic = false;
+    private Point _gizmoDragStartPt;
+    private double _gizmoStartNormX0;
+    private double _gizmoStartNormY0;
+    private double _gizmoStartNormX1;
+    private double _gizmoStartNormY1;
 
     // 3D GPU Heightmap Camera State
     private double _camYawDeg = -32.0;
@@ -188,7 +199,7 @@ public partial class MainWindow : Window
         {
             _cts.Cancel();
             TxtStatusBar.Text = "Stopping processing... please wait.";
-            BtnStopSidebar.IsEnabled = false;
+            if (BtnStopMain != null) BtnStopMain.IsEnabled = false;
         }
     }
 
@@ -638,6 +649,11 @@ public partial class MainWindow : Window
                 BtnResetExportAreaToolbar.IsEnabled = false;
                 BtnResetExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             }
+            if (BtnCenterExportAreaToolbar != null)
+            {
+                BtnCenterExportAreaToolbar.IsEnabled = false;
+                BtnCenterExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            }
             if (Btn3DReturnToGlobal != null)
                 Btn3DReturnToGlobal.Visibility = Visibility.Collapsed;
             UpdateNewExportResolutionSummary();
@@ -655,6 +671,11 @@ public partial class MainWindow : Window
         {
             BtnResetExportAreaToolbar.IsEnabled = isCustom;
             BtnResetExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        }
+        if (BtnCenterExportAreaToolbar != null)
+        {
+            BtnCenterExportAreaToolbar.IsEnabled = _tiles.Count > 0;
+            BtnCenterExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         }
         if (Btn3DReturnToGlobal != null)
             Btn3DReturnToGlobal.Visibility = isCustom ? Visibility.Visible : Visibility.Collapsed;
@@ -721,6 +742,7 @@ public partial class MainWindow : Window
                 Grd3DVisualizer.Visibility = Visibility.Collapsed;
             if (BtnResetExportAreaToolbar != null)
                 BtnResetExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            if (BtnCenterExportAreaToolbar != null) BtnCenterExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             if (BdrGridLeftStatsOverlay != null)
                 BdrGridLeftStatsOverlay.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             if (PnlViewport3DBar != null)
@@ -761,13 +783,14 @@ public partial class MainWindow : Window
             if (Bdr2DScaleBar != null)
                 Bdr2DScaleBar.Visibility = showGrid ? Visibility.Visible : Visibility.Collapsed;
             if (BdrGridLeftStatsOverlay != null)
-                BdrGridLeftStatsOverlay.Visibility = showGrid ? Visibility.Visible : Visibility.Collapsed;
+                BdrGridLeftStatsOverlay.Visibility = (showGrid || showInspector) ? Visibility.Visible : Visibility.Collapsed;
             GrdTileInspector.Visibility = showInspector ? Visibility.Visible : Visibility.Collapsed;
             if (Grd3DVisualizer != null)
                 Grd3DVisualizer.Visibility = show3D ? Visibility.Visible : Visibility.Collapsed;
 
             if (BtnResetExportAreaToolbar != null)
                 BtnResetExportAreaToolbar.Visibility = showGrid ? Visibility.Visible : Visibility.Collapsed;
+            if (BtnCenterExportAreaToolbar != null) BtnCenterExportAreaToolbar.Visibility = showGrid ? Visibility.Visible : Visibility.Collapsed;
             if (PnlViewport3DBar != null)
                 PnlViewport3DBar.Visibility = show3D ? Visibility.Visible : Visibility.Collapsed;
 
@@ -776,60 +799,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private double _metersPerPixel = 1.0;
+
     private double GetMetersPerPixelFromUi()
     {
-        if (TxtMetersPerPixel != null &&
-            double.TryParse(TxtMetersPerPixel.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double mpp) &&
-            mpp > 0)
-        {
-            return mpp;
-        }
-        return 1.0;
-    }
-
-    private void TxtMetersPerPixel_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (_isInitializing) return;
-        _isAuto3DZScale = true;
-        UpdateGlobalStatsDisplay();
-    }
-
-    private void TxtMetersPerPixel_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter && !_isInitializing)
-        {
-            _isAuto3DZScale = true;
-            UpdateGlobalStatsDisplay();
-        }
-    }
-
-    private void BtnAutoScaleFromGeoTiff_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tiles.Count == 0)
-        {
-            MessageBox.Show("Load one or more GeoTIFF tiles first to read their pixel scale.", "No Tiles Loaded",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
         var tileWithScale = _tiles.FirstOrDefault(t => t.PixelScaleX.HasValue && t.PixelScaleX.Value > 0);
         if (tileWithScale != null)
         {
             double sx = tileWithScale.PixelScaleX!.Value;
-            // If scale is in geographic degrees (e.g. 0.00001 deg), convert approximately to meters (~111,320 m/deg)
-            double meters = sx < 0.01 ? sx * 111320.0 : sx;
-            TxtMetersPerPixel.Text = meters.ToString("0.###", CultureInfo.InvariantCulture);
-            _isAuto3DZScale = true;
-            UpdateGlobalStatsDisplay();
-            TxtStatusBar.Text = $"Updated scale from GeoTIFF tag: {meters:0.###} meters/pixel.";
+            return sx < 0.01 ? sx * 111320.0 : sx;
         }
-        else
-        {
-            TxtMetersPerPixel.Text = "1.0";
-            _isAuto3DZScale = true;
-            UpdateGlobalStatsDisplay();
-            TxtStatusBar.Text = "No GeoTIFF ModelPixelScaleTag found; defaulted to 1.0 meter/pixel.";
-        }
+        return _metersPerPixel > 0 ? _metersPerPixel : 1.0;
     }
 
     private void ChkExportStandardXyNaming_Changed(object sender, RoutedEventArgs e)
@@ -838,28 +818,19 @@ public partial class MainWindow : Window
         bool useStandardXy = ChkExportStandardXyNaming.IsChecked == true;
         GrdExportPrefixRow.Visibility = useStandardXy ? Visibility.Visible : Visibility.Collapsed;
         GrdExportSuffixRow.Visibility = useStandardXy ? Visibility.Collapsed : Visibility.Visible;
+        HighlightSelectedResolutionButton();
         UpdateExpectedOutputFilesList();
     }
 
     private void ExportNaming_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_isInitializing) return;
+        HighlightSelectedResolutionButton();
         UpdateExpectedOutputFilesList();
     }
 
     private void SyncGridDimensionsBoxes()
     {
-        if (_tiles.Count == 0)
-        {
-            TxtGridRows.Text = "1";
-            TxtGridCols.Text = "1";
-            return;
-        }
-
-        int maxRow = _tiles.Max(t => t.GridRow) + 1;
-        int maxCol = _tiles.Max(t => t.GridCol) + 1;
-        TxtGridRows.Text = Math.Max(1, maxRow).ToString();
-        TxtGridCols.Text = Math.Max(1, maxCol).ToString();
     }
 
     /// <summary>
@@ -902,6 +873,19 @@ public partial class MainWindow : Window
         _mosaicCanvasWidth = Math.Max(1.0, _colDispWidths.Sum());
         _mosaicCanvasHeight = Math.Max(1.0, _rowDispHeights.Sum());
 
+        _mosaicOverlayCanvas = new Canvas
+        {
+            Width = _mosaicCanvasWidth,
+            Height = _mosaicCanvasHeight,
+            Background = Brushes.Transparent,
+            Cursor = Cursors.Cross,
+            ClipToBounds = true
+        };
+        _mosaicOverlayCanvas.MouseLeftButtonDown += MosaicOverlayCanvas_MouseLeftButtonDown;
+        _mosaicOverlayCanvas.MouseMove += MosaicOverlayCanvas_MouseMove;
+        _mosaicOverlayCanvas.MouseLeftButtonUp += MosaicOverlayCanvas_MouseLeftButtonUp;
+        _mosaicOverlayCanvas.MouseLeave += MosaicOverlayCanvas_MouseLeave;
+
         // Rows 0..rows-1 = Tile Rows (flush to top & left with overlaid scale/coordinate legend badges)
         for (int r = 0; r < rows; r++)
         {
@@ -929,6 +913,14 @@ public partial class MainWindow : Window
             .ToDictionary(g => g.Key, g => g.First());
 
         // Populate Tile Cells directly at [r, c] with overlaid coordinate scale legend badges
+        // Reset 2D Grid zoom scale when loading or rebuilding mosaic
+        if (ScaleGridMosaic != null)
+        {
+            ScaleGridMosaic.ScaleX = 1.0;
+            ScaleGridMosaic.ScaleY = 1.0;
+        }
+
+        // Populate Tile Cells directly at [r, c] with restyled map grid legends and bottom-corner coordinate badges
         for (int r = 0; r < rows; r++)
         {
             for (int c = 0; c < cols; c++)
@@ -948,82 +940,138 @@ public partial class MainWindow : Window
                     RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.NearestNeighbor);
                     cellGrid.Children.Add(img);
 
+                    // Top-Left: Tile Source Filename & Custom Fill Badge
+                    string fillBadge = tile.FillOverride != TileFillModeOverride.UseGlobalDefault
+                        ? $" [{effectiveFill}]"
+                        : string.Empty;
+
                     var labelBorder = new Border
                     {
-                        Background = new SolidColorBrush(Color.FromArgb(195, 16, 22, 18)),
+                        Background = new SolidColorBrush(Color.FromArgb(195, 14, 20, 16)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(60, 255, 255, 255)),
+                        BorderThickness = new Thickness(0.75),
                         CornerRadius = new CornerRadius(4),
                         Padding = new Thickness(5, 2, 5, 2),
-                        Margin = new Thickness(5, r == 0 ? 26 : 5, 5, 5),
+                        Margin = new Thickness(5, r == 0 ? 27 : 5, 5, 5),
                         HorizontalAlignment = HorizontalAlignment.Left,
                         VerticalAlignment = VerticalAlignment.Top,
                         IsHitTestVisible = false
                     };
 
-                    string fillBadge = tile.FillOverride != TileFillModeOverride.UseGlobalDefault
-                        ? $" [{effectiveFill}]"
-                        : string.Empty;
-
                     var labelText = new TextBlock
                     {
-                        Text = $"{tile.ColCoordinateLabel}, {tile.RowCoordinateLabel}{fillBadge} • {tile.FileName}",
+                        Text = $"{tile.FileName}{fillBadge}",
                         Foreground = Brushes.White,
-                        FontSize = 10,
+                        FontSize = 9.5,
                         FontWeight = FontWeights.SemiBold
                     };
                     labelBorder.Child = labelText;
                     cellGrid.Children.Add(labelBorder);
 
-                    // Overlay Column Header Scale Legend on Top Row (r == 0)
+                    // Restyled Column Header (Centered across column on top row, styled like a map grid legend)
                     if (r == 0)
                     {
-                        string colLabel = !string.IsNullOrEmpty(tile.ColCoordinateLabel) ? tile.ColCoordinateLabel : $"Col {c} (X)";
+                        string colLabel = !string.IsNullOrEmpty(tile.ColCoordinateLabel) ? tile.ColCoordinateLabel : $"x{c}";
                         var colOverlayBadge = new Border
                         {
-                            Background = new SolidColorBrush(Color.FromArgb(205, 14, 20, 16)),
-                            BorderBrush = new SolidColorBrush(Color.FromArgb(120, 255, 255, 255)),
-                            BorderThickness = new Thickness(0.75),
-                            CornerRadius = new CornerRadius(3),
-                            Padding = new Thickness(6, 2, 6, 2),
-                            Margin = new Thickness(5, 4, 5, 0),
-                            HorizontalAlignment = HorizontalAlignment.Left,
+                            Background = new SolidColorBrush(Color.FromArgb(220, 12, 18, 14)),
+                            BorderBrush = new SolidColorBrush(Color.FromArgb(150, 232, 168, 73)),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(4),
+                            Padding = new Thickness(8, 2.5, 8, 2.5),
+                            Margin = new Thickness(0, 3, 0, 0),
+                            HorizontalAlignment = HorizontalAlignment.Center,
                             VerticalAlignment = VerticalAlignment.Top,
-                            IsHitTestVisible = false,
-                            Child = new TextBlock
-                            {
-                                Text = $"COL {c} • {colLabel}",
-                                Foreground = accentPrimaryBrush,
-                                FontSize = 9.5,
-                                FontWeight = FontWeights.Bold
-                            }
+                            IsHitTestVisible = false
                         };
+
+                        var colPanel = new StackPanel { Orientation = Orientation.Horizontal };
+                        colPanel.Children.Add(new TextBlock
+                        {
+                            Text = $"COL {c}",
+                            Foreground = accentPrimaryBrush,
+                            FontSize = 9.5,
+                            FontWeight = FontWeights.Bold
+                        });
+                        colPanel.Children.Add(new TextBlock
+                        {
+                            Text = " \u2022 ",
+                            Foreground = textMutedBrush,
+                            FontSize = 9.5
+                        });
+                        colPanel.Children.Add(new TextBlock
+                        {
+                            Text = colLabel,
+                            Foreground = Brushes.White,
+                            FontSize = 9.5,
+                            FontWeight = FontWeights.SemiBold
+                        });
+                        colOverlayBadge.Child = colPanel;
                         cellGrid.Children.Add(colOverlayBadge);
                     }
 
-                    // Overlay Row Header Scale Legend on Left Column (c == 0)
+                    // Restyled Row Header (Centered vertically on left edge of first column, styled like a map grid legend)
                     if (c == 0)
                     {
-                        string rowLabel = !string.IsNullOrEmpty(tile.RowCoordinateLabel) ? tile.RowCoordinateLabel : $"Row {r} (Y)";
+                        string rowLabel = !string.IsNullOrEmpty(tile.RowCoordinateLabel) ? tile.RowCoordinateLabel : $"y{r}";
                         var rowOverlayBadge = new Border
                         {
-                            Background = new SolidColorBrush(Color.FromArgb(205, 14, 20, 16)),
-                            BorderBrush = new SolidColorBrush(Color.FromArgb(120, 255, 255, 255)),
-                            BorderThickness = new Thickness(0.75),
-                            CornerRadius = new CornerRadius(3),
-                            Padding = new Thickness(6, 2, 6, 2),
-                            Margin = new Thickness(5, 0, 0, 5),
+                            Background = new SolidColorBrush(Color.FromArgb(220, 12, 18, 14)),
+                            BorderBrush = new SolidColorBrush(Color.FromArgb(150, 232, 168, 73)),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(4),
+                            Padding = new Thickness(6, 4, 6, 4),
+                            Margin = new Thickness(3, 0, 0, 0),
                             HorizontalAlignment = HorizontalAlignment.Left,
                             VerticalAlignment = VerticalAlignment.Center,
-                            IsHitTestVisible = false,
-                            Child = new TextBlock
-                            {
-                                Text = $"ROW {r} • {rowLabel}",
-                                Foreground = accentPrimaryBrush,
-                                FontSize = 9.5,
-                                FontWeight = FontWeights.Bold
-                            }
+                            IsHitTestVisible = false
                         };
+
+                        var rowPanel = new StackPanel { Orientation = Orientation.Vertical, HorizontalAlignment = HorizontalAlignment.Center };
+                        rowPanel.Children.Add(new TextBlock
+                        {
+                            Text = $"ROW {r}",
+                            Foreground = accentPrimaryBrush,
+                            FontSize = 9,
+                            FontWeight = FontWeights.Bold,
+                            HorizontalAlignment = HorizontalAlignment.Center
+                        });
+                        rowPanel.Children.Add(new TextBlock
+                        {
+                            Text = rowLabel,
+                            Foreground = Brushes.White,
+                            FontSize = 9,
+                            FontWeight = FontWeights.SemiBold,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            Margin = new Thickness(0, 1, 0, 0)
+                        });
+                        rowOverlayBadge.Child = rowPanel;
                         cellGrid.Children.Add(rowOverlayBadge);
                     }
+
+                    // Bottom-Right Corner: 0x0y, 1x0y Tile Coordinate Slot Badge
+                    var slotBadge = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(215, 12, 18, 14)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(130, 232, 168, 73)),
+                        BorderThickness = new Thickness(0.8),
+                        CornerRadius = new CornerRadius(3.5),
+                        Padding = new Thickness(5, 1.5, 5, 1.5),
+                        Margin = new Thickness(0, 0, 4, 4),
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        VerticalAlignment = VerticalAlignment.Bottom,
+                        IsHitTestVisible = false,
+                        ToolTip = $"Tile Grid Coordinates: {c}x{r}y (Col {c}, Row {r})",
+                        Child = new TextBlock
+                        {
+                            Text = $"{c}x{r}y",
+                            Foreground = accentPrimaryBrush,
+                            FontFamily = new FontFamily("Consolas, monospace"),
+                            FontSize = 10,
+                            FontWeight = FontWeights.Bold
+                        }
+                    };
+                    cellGrid.Children.Add(slotBadge);
 
                     var cellBorder = new Border
                     {
@@ -1062,22 +1110,6 @@ public partial class MainWindow : Window
                 }
             }
         }
-
-        // Interactive Overlay Canvas spanning all tile cells (Rows 0..rows-1, Cols 0..cols-1) for Export Area Dragging & Tile Selection
-        _mosaicOverlayCanvas = new Canvas
-        {
-            Width = _mosaicCanvasWidth,
-            Height = _mosaicCanvasHeight,
-            Background = Brushes.Transparent,
-            Cursor = Cursors.Cross,
-            ClipToBounds = true,
-            ToolTip = "Click and drag to redefine the Export Area • Click a tile to select • Double-click to open Individual Tile Inspector"
-        };
-
-        _mosaicOverlayCanvas.MouseLeftButtonDown += MosaicOverlayCanvas_MouseLeftButtonDown;
-        _mosaicOverlayCanvas.MouseMove += MosaicOverlayCanvas_MouseMove;
-        _mosaicOverlayCanvas.MouseLeftButtonUp += MosaicOverlayCanvas_MouseLeftButtonUp;
-
         Grid.SetRow(_mosaicOverlayCanvas, 0);
         Grid.SetColumn(_mosaicOverlayCanvas, 0);
         Grid.SetRowSpan(_mosaicOverlayCanvas, rows);
@@ -1103,22 +1135,79 @@ public partial class MainWindow : Window
             return;
         }
 
-        _mosaicDragStartPt = e.GetPosition(_mosaicOverlayCanvas);
-        _mosaicDragStartPt.X = Math.Clamp(_mosaicDragStartPt.X, 0.0, _mosaicCanvasWidth);
-        _mosaicDragStartPt.Y = Math.Clamp(_mosaicDragStartPt.Y, 0.0, _mosaicCanvasHeight);
+        Point downPt = e.GetPosition(_mosaicOverlayCanvas);
+        downPt.X = Math.Clamp(downPt.X, 0.0, _mosaicCanvasWidth);
+        downPt.Y = Math.Clamp(downPt.Y, 0.0, _mosaicCanvasHeight);
+
+        _mosaicDragStartPt = downPt;
         _isMouseDownOnMosaic = true;
         _isDraggingExportArea = false;
+
+        // Check if mouse clicked on the Transform Control Gizmo of an active custom export zone
+        if (IsPointOverGizmo(downPt))
+        {
+            _isDraggingGizmo = true;
+            _gizmoDragStartPt = downPt;
+            _gizmoStartNormX0 = _exportNormX0;
+            _gizmoStartNormY0 = _exportNormY0;
+            _gizmoStartNormX1 = _exportNormX1;
+            _gizmoStartNormY1 = _exportNormY1;
+            _mosaicOverlayCanvas.Cursor = Cursors.SizeAll;
+            _mosaicOverlayCanvas.CaptureMouse();
+            RenderExportAreaOverlay();
+            e.Handled = true;
+            return;
+        }
+
+        _isDraggingGizmo = false;
         _mosaicOverlayCanvas.CaptureMouse();
         e.Handled = true;
     }
 
     private void MosaicOverlayCanvas_MouseMove(object sender, MouseEventArgs e)
     {
-        if (!_isMouseDownOnMosaic || _mosaicOverlayCanvas == null || _tiles.Count == 0) return;
+        if (_mosaicOverlayCanvas == null || _tiles.Count == 0) return;
 
         Point curPt = e.GetPosition(_mosaicOverlayCanvas);
         curPt.X = Math.Clamp(curPt.X, 0.0, _mosaicCanvasWidth);
         curPt.Y = Math.Clamp(curPt.Y, 0.0, _mosaicCanvasHeight);
+
+        // When mouse button is not held down, update hover cursor based on proximity to the transform gizmo
+        if (!_isMouseDownOnMosaic)
+        {
+            _mosaicOverlayCanvas.Cursor = IsPointOverGizmo(curPt) ? Cursors.SizeAll : Cursors.Cross;
+            return;
+        }
+
+        if (_isDraggingGizmo)
+        {
+            double canvasW = Math.Max(1.0, _mosaicCanvasWidth);
+            double canvasH = Math.Max(1.0, _mosaicCanvasHeight);
+
+            double deltaNormX = (curPt.X - _gizmoDragStartPt.X) / canvasW;
+            double deltaNormY = (curPt.Y - _gizmoDragStartPt.Y) / canvasH;
+
+            double normW = _gizmoStartNormX1 - _gizmoStartNormX0;
+            double normH = _gizmoStartNormY1 - _gizmoStartNormY0;
+
+            double newX0 = _gizmoStartNormX0 + deltaNormX;
+            double newY0 = _gizmoStartNormY0 + deltaNormY;
+
+            // Clamp so the custom bounding box stays entirely within the mosaic bounds [0..1, 0..1]
+            newX0 = Math.Clamp(newX0, 0.0, Math.Max(0.0, 1.0 - normW));
+            newY0 = Math.Clamp(newY0, 0.0, Math.Max(0.0, 1.0 - normH));
+            double newX1 = newX0 + normW;
+            double newY1 = newY0 + normH;
+
+            _exportNormX0 = newX0;
+            _exportNormY0 = newY0;
+            _exportNormX1 = newX1;
+            _exportNormY1 = newY1;
+
+            UpdateExportAreaMetricsAndUi();
+            RenderExportAreaOverlay();
+            return;
+        }
 
         double dx = curPt.X - _mosaicDragStartPt.X;
         double dy = curPt.Y - _mosaicDragStartPt.Y;
@@ -1133,6 +1222,11 @@ public partial class MainWindow : Window
             ApplyDragPointsToExportArea(_mosaicDragStartPt, curPt);
             UpdateExportAreaMetricsAndUi();
             RenderExportAreaOverlay();
+
+            double mpp = GetMetersPerPixelFromUi();
+            double wM = _exportAreaStats.PixelWidth * mpp;
+            double hM = _exportAreaStats.PixelHeight * mpp;
+            TxtStatusBar.Text = $"Export Zone: {_exportAreaStats.PixelWidth} \u00d7 {_exportAreaStats.PixelHeight} px ({wM:N0}m \u00d7 {hM:N0}m) \u2022 Scale: {mpp:0.##} m/px \u2022 Elev [{_exportAreaStats.MinElevation:F1}m .. {_exportAreaStats.MaxElevation:F1}m]";
         }
     }
 
@@ -1144,12 +1238,30 @@ public partial class MainWindow : Window
         releasePt.X = Math.Clamp(releasePt.X, 0.0, _mosaicCanvasWidth);
         releasePt.Y = Math.Clamp(releasePt.Y, 0.0, _mosaicCanvasHeight);
 
-        bool wasDragging = _isDraggingExportArea;
+        bool wasDraggingExportArea = _isDraggingExportArea;
+        bool wasDraggingGizmo = _isDraggingGizmo;
+
         _isMouseDownOnMosaic = false;
         _isDraggingExportArea = false;
+        _isDraggingGizmo = false;
         _mosaicOverlayCanvas.ReleaseMouseCapture();
 
-        if (wasDragging)
+        if (wasDraggingGizmo)
+        {
+            _isAuto3DZScale = true;
+            UpdateGlobalStatsDisplay();
+            RenderExportAreaOverlay();
+            TxtStatusBar.Text =
+                $"Repositioned Export Area: X={_exportAreaStats.PixelX}..{_exportAreaStats.PixelX + _exportAreaStats.PixelWidth} px, " +
+                $"Y={_exportAreaStats.PixelY}..{_exportAreaStats.PixelY + _exportAreaStats.PixelHeight} px " +
+                $"({_exportAreaStats.PixelWidth} \u00d7 {_exportAreaStats.PixelHeight} px) \u2022 Elev [{_exportAreaStats.MinElevation:F2}m .. {_exportAreaStats.MaxElevation:F2}m]";
+
+            if (RbView3D?.IsChecked == true && _tiles.Count > 0)
+            {
+                _ = Rebuild3DVisualizerAsync();
+            }
+        }
+        else if (wasDraggingExportArea)
         {
             _isAuto3DZScale = true;
             ApplyDragPointsToExportArea(_mosaicDragStartPt, releasePt);
@@ -1158,16 +1270,21 @@ public partial class MainWindow : Window
             TxtStatusBar.Text =
                 $"Redefined Export Area: X={_exportAreaStats.PixelX}..{_exportAreaStats.PixelX + _exportAreaStats.PixelWidth} px, " +
                 $"Y={_exportAreaStats.PixelY}..{_exportAreaStats.PixelY + _exportAreaStats.PixelHeight} px " +
-                $"({_exportAreaStats.PixelWidth} × {_exportAreaStats.PixelHeight} px) • Elev [{_exportAreaStats.MinElevation:F2}m .. {_exportAreaStats.MaxElevation:F2}m]";
+                $"({_exportAreaStats.PixelWidth} \u00d7 {_exportAreaStats.PixelHeight} px) \u2022 Elev [{_exportAreaStats.MinElevation:F2}m .. {_exportAreaStats.MaxElevation:F2}m]";
+
+            if (RbView3D?.IsChecked == true && _tiles.Count > 0)
+            {
+                _ = Rebuild3DVisualizerAsync();
+            }
         }
         else
         {
             SelectTileAtCanvasPoint(releasePt);
         }
 
+        _mosaicOverlayCanvas.Cursor = IsPointOverGizmo(releasePt) ? Cursors.SizeAll : Cursors.Cross;
         e.Handled = true;
     }
-
     /// <summary>
     /// Applies the user's drag gesture to the Export Area while locking the bounding box to a 1:1 square aspect ratio.
     /// </summary>
@@ -1390,6 +1507,252 @@ public partial class MainWindow : Window
             Canvas.SetLeft(badge, Math.Max(4, rx0 + 6));
             Canvas.SetTop(badge, Math.Max(4, ry1 - 28));
             _mosaicOverlayCanvas.Children.Add(badge);
+
+            // 4. Center Transform Control Gizmo (Reposition Handle for Custom Zone)
+            if (isCustomArea)
+            {
+                RenderTransformGizmo(rx0, ry0, rx1, ry1, w, h);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Renders an interactive Transform Control Gizmo in the center of the custom export zone with X/Y directional arrows and a central move hub.
+    /// </summary>
+    private void RenderTransformGizmo(double rx0, double ry0, double rx1, double ry1, double canvasW, double canvasH)
+    {
+        if (_mosaicOverlayCanvas == null) return;
+
+        double cx = (rx0 + rx1) * 0.5;
+        double cy = (ry0 + ry1) * 0.5;
+        double rw = rx1 - rx0;
+        double rh = ry1 - ry0;
+
+        // Scale gizmo slightly if custom area is very small
+        double minBoxDim = Math.Min(rw, rh);
+        double gizmoScale = Math.Clamp(minBoxDim / 100.0, 0.65, 1.0);
+
+        double armLength = 26.0 * gizmoScale;
+        double arrowHeadSize = 6.0 * gizmoScale;
+        double hubRadius = 13.0 * gizmoScale;
+        double hubDiameter = hubRadius * 2.0;
+
+        // Distinct transform axis brushes (Red for X / East-West, Green for Y / North-South)
+        var xBrush = new SolidColorBrush(Color.FromRgb(255, 75, 75));
+        var yBrush = new SolidColorBrush(Color.FromRgb(65, 215, 95));
+        xBrush.Freeze();
+        yBrush.Freeze();
+
+        var hubBorderBrush = _isDraggingGizmo
+            ? new SolidColorBrush(Color.FromRgb(255, 215, 60))
+            : new SolidColorBrush(Color.FromRgb(232, 168, 73));
+        hubBorderBrush.Freeze();
+
+        var hubBgBrush = _isDraggingGizmo
+            ? new SolidColorBrush(Color.FromArgb(240, 48, 52, 42))
+            : new SolidColorBrush(Color.FromArgb(220, 16, 22, 18));
+        hubBgBrush.Freeze();
+
+        // 1. Four Directional Transform Axis Lines with Arrowheads
+        // East (X+)
+        AddGizmoArrow(cx + hubRadius * 0.7, cy, cx + armLength, cy, xBrush, arrowHeadSize, isHorizontal: true, isPositive: true);
+        // West (X-)
+        AddGizmoArrow(cx - hubRadius * 0.7, cy, cx - armLength, cy, xBrush, arrowHeadSize, isHorizontal: true, isPositive: false);
+        // North (Y-)
+        AddGizmoArrow(cx, cy - hubRadius * 0.7, cx, cy - armLength, yBrush, arrowHeadSize, isHorizontal: false, isPositive: false);
+        // South (Y+)
+        AddGizmoArrow(cx, cy + hubRadius * 0.7, cx, cy + armLength, yBrush, arrowHeadSize, isHorizontal: false, isPositive: true);
+
+        // 2. Center Hub Container with DropShadow
+        var hub = new Border
+        {
+            Width = hubDiameter,
+            Height = hubDiameter,
+            CornerRadius = new CornerRadius(hubRadius),
+            Background = hubBgBrush,
+            BorderBrush = hubBorderBrush,
+            BorderThickness = new Thickness(_isDraggingGizmo ? 2.2 : 1.6),
+            IsHitTestVisible = false,
+            Effect = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 8,
+                ShadowDepth = 2,
+                Opacity = 0.75
+            }
+        };
+
+        // Center 4-way move crosshair / translate icon
+        var iconText = new TextBlock
+        {
+            Text = "\u2725",
+            FontFamily = new FontFamily("Segoe UI Symbol, Arial, sans-serif"),
+            FontSize = 13.5 * gizmoScale,
+            FontWeight = FontWeights.Bold,
+            Foreground = _isDraggingGizmo ? new SolidColorBrush(Color.FromRgb(255, 215, 60)) : Brushes.White,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        hub.Child = iconText;
+
+        Canvas.SetLeft(hub, cx - hubRadius);
+        Canvas.SetTop(hub, cy - hubRadius);
+        _mosaicOverlayCanvas.Children.Add(hub);
+    }
+
+    private void AddGizmoArrow(double x1, double y1, double x2, double y2, Brush stroke, double headSize, bool isHorizontal, bool isPositive)
+    {
+        if (_mosaicOverlayCanvas == null) return;
+
+        var shaft = new Line
+        {
+            X1 = x1,
+            Y1 = y1,
+            X2 = x2,
+            Y2 = y2,
+            Stroke = stroke,
+            StrokeThickness = 2.2,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            IsHitTestVisible = false
+        };
+        _mosaicOverlayCanvas.Children.Add(shaft);
+
+        var head = new Polygon
+        {
+            Fill = stroke,
+            IsHitTestVisible = false
+        };
+
+        if (isHorizontal)
+        {
+            double tipX = x2;
+            double tipY = y2;
+            double baseX = isPositive ? (x2 - headSize) : (x2 + headSize);
+            head.Points = new PointCollection
+            {
+                new Point(tipX, tipY),
+                new Point(baseX, tipY - headSize * 0.6),
+                new Point(baseX, tipY + headSize * 0.6)
+            };
+        }
+        else
+        {
+            double tipX = x2;
+            double tipY = y2;
+            double baseY = isPositive ? (y2 - headSize) : (y2 + headSize);
+            head.Points = new PointCollection
+            {
+                new Point(tipX, tipY),
+                new Point(tipX - headSize * 0.6, baseY),
+                new Point(tipX + headSize * 0.6, baseY)
+            };
+        }
+
+        _mosaicOverlayCanvas.Children.Add(head);
+    }
+
+    private bool IsPointOverGizmo(Point pt)
+    {
+        if (!IsCustomExportAreaActive || _mosaicOverlayCanvas == null || _tiles.Count == 0) return false;
+
+        double w = _mosaicCanvasWidth;
+        double h = _mosaicCanvasHeight;
+        if (w <= 1 || h <= 1) return false;
+
+        double rx0 = _exportNormX0 * w;
+        double ry0 = _exportNormY0 * h;
+        double rx1 = _exportNormX1 * w;
+        double ry1 = _exportNormY1 * h;
+
+        double cx = (rx0 + rx1) * 0.5;
+        double cy = (ry0 + ry1) * 0.5;
+
+        double dx = pt.X - cx;
+        double dy = pt.Y - cy;
+
+        double minBoxDim = Math.Min(rx1 - rx0, ry1 - ry0);
+        double gizmoScale = Math.Clamp(minBoxDim / 100.0, 0.65, 1.0);
+        double hitRadius = 28.0 * gizmoScale;
+
+        return (dx * dx + dy * dy) <= (hitRadius * hitRadius);
+    }
+
+    private void SvGridMosaic_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true; // Prevent default vertical scroll / panning
+        if (ScaleGridMosaic == null || SvGridMosaic == null) return;
+
+        Point mousePos = e.GetPosition(SvGridMosaic);
+        double oldScale = ScaleGridMosaic.ScaleX;
+        double zoomFactor = e.Delta > 0 ? 1.15 : (1.0 / 1.15);
+        double newScale = Math.Clamp(oldScale * zoomFactor, 1.0, 10.0);
+
+        if (Math.Abs(newScale - oldScale) < 0.0001) return;
+
+        ScaleGridMosaic.ScaleX = newScale;
+        ScaleGridMosaic.ScaleY = newScale;
+        SvGridMosaic.UpdateLayout();
+
+        if (newScale <= 1.001)
+        {
+            SvGridMosaic.ScrollToHorizontalOffset(0);
+            SvGridMosaic.ScrollToVerticalOffset(0);
+        }
+        else
+        {
+            double contentX = (mousePos.X + SvGridMosaic.HorizontalOffset) / oldScale;
+            double contentY = (mousePos.Y + SvGridMosaic.VerticalOffset) / oldScale;
+            double newHOffset = contentX * newScale - mousePos.X;
+            double newVOffset = contentY * newScale - mousePos.Y;
+            SvGridMosaic.ScrollToHorizontalOffset(Math.Max(0, newHOffset));
+            SvGridMosaic.ScrollToVerticalOffset(Math.Max(0, newVOffset));
+        }
+    }
+
+    private void SvGridMosaic_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.MiddleButton == MouseButtonState.Pressed || e.RightButton == MouseButtonState.Pressed)
+        {
+            _isPanningMosaic = true;
+            _mosaicPanStartPt = e.GetPosition(SvGridMosaic);
+            _mosaicPanStartHOffset = SvGridMosaic.HorizontalOffset;
+            _mosaicPanStartVOffset = SvGridMosaic.VerticalOffset;
+            SvGridMosaic.CaptureMouse();
+            SvGridMosaic.Cursor = Cursors.SizeAll;
+            e.Handled = true;
+        }
+    }
+
+    private void SvGridMosaic_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_isPanningMosaic)
+        {
+            Point curPt = e.GetPosition(SvGridMosaic);
+            double dx = curPt.X - _mosaicPanStartPt.X;
+            double dy = curPt.Y - _mosaicPanStartPt.Y;
+            SvGridMosaic.ScrollToHorizontalOffset(_mosaicPanStartHOffset - dx);
+            SvGridMosaic.ScrollToVerticalOffset(_mosaicPanStartVOffset - dy);
+            e.Handled = true;
+        }
+    }
+
+    private void SvGridMosaic_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_isPanningMosaic)
+        {
+            _isPanningMosaic = false;
+            SvGridMosaic.ReleaseMouseCapture();
+            SvGridMosaic.Cursor = Cursors.Arrow;
+            e.Handled = true;
+        }
+    }
+
+    private void MosaicOverlayCanvas_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (!_isMouseDownOnMosaic && _mosaicOverlayCanvas != null)
+        {
+            _mosaicOverlayCanvas.Cursor = Cursors.Cross;
         }
     }
 
@@ -1645,39 +2008,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void BtnApplyGridDimensions_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tiles.Count == 0) return;
-
-        if (int.TryParse(TxtGridRows.Text, out int rows) && rows > 0 &&
-            int.TryParse(TxtGridCols.Text, out int cols) && cols > 0)
-        {
-            for (int i = 0; i < _tiles.Count; i++)
-            {
-                int r = (i / cols) % Math.Max(rows, (_tiles.Count + cols - 1) / cols);
-                int c = i % cols;
-                _tiles[i].GridRow = r;
-                _tiles[i].GridCol = c;
-                if (string.IsNullOrEmpty(_tiles[i].ColCoordinateLabel))
-                    _tiles[i].ColCoordinateLabel = $"X: {c}";
-                if (string.IsNullOrEmpty(_tiles[i].RowCoordinateLabel))
-                    _tiles[i].RowCoordinateLabel = $"Y: {r}";
-            }
-            SyncGridDimensionsBoxes();
-            UpdateGlobalStatsDisplay();
-            RebuildMosaicGrid();
-            if (RbView3D?.IsChecked == true)
-            {
-                await Rebuild3DVisualizerAsync();
-            }
-        }
-        else
-        {
-            MessageBox.Show("Please enter positive integers for Grid Rows and Columns.", "Invalid Grid Dimensions",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
     private async void PreviewMode_Changed(object sender, RoutedEventArgs e)
     {
         if (_isInitializing) return;
@@ -1772,6 +2102,16 @@ public partial class MainWindow : Window
     {
         if (RbExportSingleImage?.IsChecked == true)
         {
+            return (1, 1);
+        }
+        if (RbExportSourceGrid?.IsChecked == true)
+        {
+            if (_tiles.Count > 0)
+            {
+                int maxRow = _tiles.Max(t => t.GridRow) + 1;
+                int maxCol = _tiles.Max(t => t.GridCol) + 1;
+                return (Math.Max(1, maxRow), Math.Max(1, maxCol));
+            }
             return (1, 1);
         }
 
@@ -1912,6 +2252,7 @@ public partial class MainWindow : Window
                 $"Output: {rows} × {cols} Grid • {fileW} × {fileH} px/file ({totalPxW} × {totalPxH} px total) • Export/Source Ratio: {ratioText}";
         }
 
+        HighlightSelectedResolutionButton();
         UpdateExpectedOutputFilesList();
     }
 
@@ -2253,6 +2594,7 @@ public partial class MainWindow : Window
             AdjustExportHeightForLockedAspectRatio();
         }
 
+        HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
     }
@@ -2268,6 +2610,7 @@ public partial class MainWindow : Window
         {
             AdjustExportHeightForLockedAspectRatio();
         }
+        HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
     }
@@ -2297,6 +2640,7 @@ public partial class MainWindow : Window
         _matchNativeExportResolution = false;
         if (ChkLockExportAspectRatio?.IsChecked == true)
             AdjustExportHeightForLockedAspectRatio();
+        HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
     }
@@ -2305,6 +2649,7 @@ public partial class MainWindow : Window
     {
         if (_isInitializing || _isSyncingExportResolutionBoxes) return;
         _matchNativeExportResolution = false;
+        HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
     }
@@ -2329,32 +2674,33 @@ public partial class MainWindow : Window
         {
             1 => new[]
             {
-                ("505", "505", "Unreal Engine Landscape recommended heightmap resolution: 505 × 505 (8×8 components, 63×63 quads)"),
-                ("1009", "1009", "Unreal Engine Landscape recommended heightmap resolution: 1009 × 1009 (16×16 components, 63×63 quads)"),
-                ("2017", "2017", "Unreal Engine Landscape recommended heightmap resolution: 2017 × 2017 (16×16 components, 126×126 quads)"),
-                ("4033", "4033", "Unreal Engine Landscape recommended heightmap resolution: 4033 × 4033 (32×32 components, 126×126 quads)"),
-                ("8129", "8129", "Unreal Engine Landscape recommended heightmap resolution: 8129 × 8129 (32×32 components, 254×254 quads)")
+                ("1009", "1009", "Unreal Engine Landscape recommended heightmap resolution: 1009 \u00d7 1009 (16\u00d716 components, 63\u00d763 quads)"),
+                ("2017", "2017", "Unreal Engine Landscape recommended heightmap resolution: 2017 \u00d7 2017 (16\u00d716 components, 126\u00d7126 quads)"),
+                ("4033", "4033", "Unreal Engine Landscape recommended heightmap resolution: 4033 \u00d7 4033 (32\u00d732 components, 126\u00d7126 quads)"),
+                ("8129", "8129", "Unreal Engine Landscape recommended heightmap resolution: 8129 \u00d7 8129 (32\u00d732 components, 254\u00d7254 quads)"),
+                ("16129", "16129", "Unreal Engine Landscape 16K recommended heightmap resolution: 16129 \u00d7 16129 (64\u00d764 components, 254\u00d7254 quads)")
             },
             2 => new[]
             {
-                ("257", "257", "Unity Terrain standard heightmap resolution (2^n + 1): 257 × 257"),
-                ("513", "513", "Unity Terrain standard heightmap resolution (2^n + 1): 513 × 513"),
-                ("1025", "1025", "Unity Terrain standard heightmap resolution (2^n + 1): 1025 × 1025"),
-                ("2049", "2049", "Unity Terrain standard heightmap resolution (2^n + 1): 2049 × 2049"),
-                ("4097", "4097", "Unity Terrain maximum standard heightmap resolution (2^n + 1): 4097 × 4097")
+                ("1025", "1025", "Unity Terrain standard heightmap resolution (2^n + 1): 1025 \u00d7 1025"),
+                ("2049", "2049", "Unity Terrain standard heightmap resolution (2^n + 1): 2049 \u00d7 2049"),
+                ("4097", "4097", "Unity Terrain maximum standard heightmap resolution (2^n + 1): 4097 \u00d7 4097"),
+                ("8193", "8193", "Unity Terrain standard heightmap resolution (2^n + 1): 8193 \u00d7 8193"),
+                ("16385", "16385", "Unity Terrain 16K heightmap resolution (2^n + 1): 16385 \u00d7 16385")
             },
             _ => new[]
             {
-                ("512", "512", "Power-of-Two resolution: 512 × 512 px"),
-                ("1024", "1024", "Power-of-Two resolution: 1024 × 1024 px"),
-                ("2048", "2048", "Power-of-Two resolution: 2048 × 2048 px"),
-                ("4096", "4096", "Power-of-Two resolution: 4096 × 4096 px"),
-                ("8192", "8192", "Power-of-Two resolution: 8192 × 8192 px")
+                ("1024", "1024", "Power-of-Two resolution: 1024 \u00d7 1024 px"),
+                ("2048", "2048", "Power-of-Two resolution: 2048 \u00d7 2048 px"),
+                ("4096", "4096", "Power-of-Two resolution: 4096 \u00d7 4096 px"),
+                ("8192", "8192", "Power-of-Two resolution: 8192 \u00d7 8192 px"),
+                ("16384", "16384", "Power-of-Two 16K resolution: 16384 \u00d7 16384 px")
             }
         };
 
-        BtnResPreset0.Content = "Native 1:1";
+        BtnResPreset0.Content = "Source";
         BtnResPreset0.Tag = "Native";
+        BtnResPreset0.ToolTip = "Set file resolution to exact 1:1 source pixels of the export area divided by the output grid";
 
         Button[] numericButtons = { BtnResPreset1, BtnResPreset2, BtnResPreset3, BtnResPreset4, BtnResPreset5 };
         for (int i = 0; i < numericButtons.Length; i++)
@@ -2363,6 +2709,134 @@ public partial class MainWindow : Window
             numericButtons[i].Tag = presets[i].Tag;
             numericButtons[i].ToolTip = presets[i].Tooltip;
         }
+
+        HighlightSelectedResolutionButton();
+    }
+
+    private void HighlightSelectedResolutionButton()
+    {
+        if (BtnResPreset0 == null || BtnResPreset1 == null || BtnResPreset2 == null ||
+            BtnResPreset3 == null || BtnResPreset4 == null || BtnResPreset5 == null) return;
+
+        var primaryStyle = (Style)FindResource("PrimaryButton");
+        var secondaryStyle = (Style)FindResource("SecondaryButton");
+
+        if (_matchNativeExportResolution)
+        {
+            BtnResPreset0.Style = primaryStyle;
+            BtnResPreset1.Style = secondaryStyle;
+            BtnResPreset2.Style = secondaryStyle;
+            BtnResPreset3.Style = secondaryStyle;
+            BtnResPreset4.Style = secondaryStyle;
+            BtnResPreset5.Style = secondaryStyle;
+            return;
+        }
+
+        BtnResPreset0.Style = secondaryStyle;
+        var (w, _) = GetNewExportFileResolutionFromUi();
+        string wStr = w.ToString(CultureInfo.InvariantCulture);
+
+        Button[] numericButtons = { BtnResPreset1, BtnResPreset2, BtnResPreset3, BtnResPreset4, BtnResPreset5 };
+        foreach (var btn in numericButtons)
+        {
+            btn.Style = (btn.Tag is string tag && tag == wStr) ? primaryStyle : secondaryStyle;
+        }
+    }
+
+    private void BtnCenterExportArea_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tiles.Count == 0) return;
+        var mosaic = DemProcessor.BuildMosaicDescriptor(_tiles, _globalMin);
+        if (mosaic.TotalWidth <= 0 || mosaic.TotalHeight <= 0) return;
+
+        var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+        var (outRows, outCols) = GetNewExportGridDimensionsFromUi();
+
+        int targetW = fileW * outCols;
+        int targetH = fileH * outRows;
+
+        targetW = Math.Clamp(targetW, 1, mosaic.TotalWidth);
+        targetH = Math.Clamp(targetH, 1, mosaic.TotalHeight);
+
+        double normW = Math.Min(1.0, (double)targetW / mosaic.TotalWidth);
+        double normH = Math.Min(1.0, (double)targetH / mosaic.TotalHeight);
+
+        _exportNormX0 = Math.Max(0.0, (1.0 - normW) * 0.5);
+        _exportNormY0 = Math.Max(0.0, (1.0 - normH) * 0.5);
+        _exportNormX1 = Math.Min(1.0, _exportNormX0 + normW);
+        _exportNormY1 = Math.Min(1.0, _exportNormY0 + normH);
+
+        _isAuto3DZScale = true;
+        UpdateGlobalStatsDisplay();
+        UpdateExportAreaMetricsAndUi();
+        RenderExportAreaOverlay();
+        Update2DScaleBar();
+
+        double mpp = GetMetersPerPixelFromUi();
+        double wM = _exportAreaStats.PixelWidth * mpp;
+        double hM = _exportAreaStats.PixelHeight * mpp;
+        TxtStatusBar.Text = $"Centered export area: {_exportAreaStats.PixelWidth} \u00d7 {_exportAreaStats.PixelHeight} px ({wM:N0}m \u00d7 {hM:N0}m) \u2022 Scale: {mpp:0.##} m/px \u2022 Elev [{_exportAreaStats.MinElevation:F2}m .. {_exportAreaStats.MaxElevation:F2}m]";
+
+        if (RbView3D?.IsChecked == true && _tiles.Count > 0)
+        {
+            _ = Rebuild3DVisualizerAsync();
+        }
+    }
+
+    private void BtnDivideResolution_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing) return;
+        var (curW, curH) = GetNewExportFileResolutionFromUi();
+        int newW = Math.Max(1, curW / 2);
+        int newH = Math.Max(1, curH / 2);
+        _matchNativeExportResolution = false;
+        _isSyncingExportResolutionBoxes = true;
+        try
+        {
+            TxtNewExportWidth.Text = newW.ToString(CultureInfo.InvariantCulture);
+            TxtNewExportHeight.Text = newH.ToString(CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _isSyncingExportResolutionBoxes = false;
+        }
+
+        if (ChkLockExportAspectRatio?.IsChecked == true)
+        {
+            AdjustExportHeightForLockedAspectRatio();
+        }
+
+        UpdateNewExportResolutionSummary();
+        HighlightSelectedResolutionButton();
+        RenderExportAreaOverlay();
+    }
+
+    private void BtnMultiplyResolution_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing) return;
+        var (curW, curH) = GetNewExportFileResolutionFromUi();
+        int newW = Math.Min(65536, curW * 2);
+        int newH = Math.Min(65536, curH * 2);
+        _matchNativeExportResolution = false;
+        _isSyncingExportResolutionBoxes = true;
+        try
+        {
+            TxtNewExportWidth.Text = newW.ToString(CultureInfo.InvariantCulture);
+            TxtNewExportHeight.Text = newH.ToString(CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _isSyncingExportResolutionBoxes = false;
+        }
+
+        if (ChkLockExportAspectRatio?.IsChecked == true)
+        {
+            AdjustExportHeightForLockedAspectRatio();
+        }
+
+        UpdateNewExportResolutionSummary();
+        HighlightSelectedResolutionButton();
+        RenderExportAreaOverlay();
     }
 
     private void BtnPresetResolution_Click(object sender, RoutedEventArgs e)
@@ -2404,6 +2878,7 @@ public partial class MainWindow : Window
             }
         }
 
+        HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
     }
@@ -3071,7 +3546,8 @@ public partial class MainWindow : Window
         BtnProcessAll.IsEnabled = !busy;
         if (BtnExportMain != null) BtnExportMain.IsEnabled = !busy;
         if (BtnApplySeamSmoothing != null) BtnApplySeamSmoothing.IsEnabled = !busy;
-        BtnStopSidebar.IsEnabled = busy;
+        if (BtnStopMain != null) BtnStopMain.IsEnabled = busy;
+        PbProgress.IsIndeterminate = busy;
         if (!busy)
         {
             PbProgress.Value = 0;
