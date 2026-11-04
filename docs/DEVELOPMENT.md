@@ -96,7 +96,24 @@ The recommended test coverage should validate:
 
 ---
 
-## 5. Release Preparation Checklist
+## 5. Release Packaging & Preparation Checklist
+
+### Automated Release Packaging
+A helper script is provided to automate clean compilation, self-testing, and packaging into a standard GitHub release ZIP archive:
+
+```powershell
+# From the repository root
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Version "1.0.0"
+```
+
+This script:
+1. Cleans previous release outputs in `release/`.
+2. Publishes `DemCleaner.csproj` in Release configuration (`release/DemCleaner-v<version>-win-x64/`).
+3. Embeds `LICENSE.txt` and a consumer-facing `README.txt`.
+4. Executes the automated smoke test on the published executable.
+5. Packages the directory into a distributable archive (`release/DemCleaner-v<version>-win-x64.zip`).
+
+### Release Preparation Checklist
 
 Before publishing or distributing a new version of DEM Cleaner:
 
