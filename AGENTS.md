@@ -9,7 +9,7 @@ This is the primary operational guide for AI coding agents working on **DEM Clea
 **DEM Cleaner** is a Windows desktop application (.NET 8 / WPF) by Sipp Studio for inspecting, repairing, stitching, previewing (2D & GPU 3D), cropping, and exporting Digital Elevation Model (DEM) GeoTIFF datasets.
 
 - **Stack**: C# 12, .NET 8.0 (`net8.0-windows`), WPF, `BitMiracle.LibTiff.NET` (2.4.660).
-- **Entry Points**: [App.xaml.cs](App.xaml.cs) (`OnStartup`, `--self-test`), [MainWindow.xaml.cs](MainWindow.xaml.cs) (UI and workflow orchestration).
+- **Entry Points**: [Views/App.xaml.cs](Views/App.xaml.cs) (`OnStartup`, `--self-test`), [Views/MainWindow.xaml.cs](Views/MainWindow.xaml.cs) (UI and workflow orchestration).
 - **Core Engine**: [Services/DemProcessor.cs](Services/DemProcessor.cs) (pure compute, void filling, seam smoothing, resampling, export), [Services/TiffDemReader.cs](Services/TiffDemReader.cs) (TIFF I/O and grid arrangement).
 
 ---

@@ -36,13 +36,18 @@ This document provides a technical reference for the **DEM Cleaner** architectur
 
 ```text
 DEM Cleaner/
-├── App.xaml / App.xaml.cs          # Application startup and headless --self-test CLI runner
-├── AssemblyInfo.cs                 # WPF ThemeInfo configuration
 ├── DemCleaner.csproj               # .NET 8 WPF project file with Debug PostBuild launch hook
 ├── DemCleaner.slnx                 # Solution file
 ├── LICENSE.txt                     # Proprietary software license (copied to build output)
-├── MainWindow.xaml / .cs           # Primary window: UI layout, viewport canvas, 3D camera, pipelines
-├── images/                         # Application icon (icon2.ico) and documentation preview screenshots
+├── README.md                       # Consumer project documentation and visual tour
+├── AGENTS.md                       # AI agent operational reference and critical invariants
+├── docs/                           # Architecture, development workflows, and release notes
+├── images/                         # Application icons (icon.png, icon2.ico) and preview screenshots
+├── Properties/
+│   └── AssemblyInfo.cs             # WPF ThemeInfo configuration
+├── Views/
+│   ├── App.xaml / App.xaml.cs      # Application startup and headless --self-test CLI runner
+│   └── MainWindow.xaml / .cs       # Primary window: UI layout, viewport canvas, 3D camera, pipelines
 ├── Models/
 │   └── DemTile.cs                  # DemTile, DemProcessingOptions, ExpectedOutputFileItem, enums
 └── Services/
@@ -139,7 +144,7 @@ classDiagram
 ```
 
 ### Component Details
-1. **[MainWindow.xaml.cs](MainWindow.xaml.cs)**: Main UI controller. Manages UI event routing, 2D viewport pan/zoom transforms, custom square crop gizmo interactions, 3D orbit/pan camera math, and async task orchestration via `_cts` and `_cts3D`.
+1. **[Views/MainWindow.xaml.cs](../Views/MainWindow.xaml.cs)**: Main UI controller. Manages UI event routing, 2D viewport pan/zoom transforms, custom square crop gizmo interactions, 3D orbit/pan camera math, and async task orchestration via `_cts` and `_cts3D`.
 2. **[Models/DemTile.cs](Models/DemTile.cs)**: Data carrier implementing `INotifyPropertyChanged`. Contains tile dimensions, geographic metadata, and the three distinct elevation buffers (`RawData`, `BaseFilledData`, `FilledData`).
 3. **[Services/TiffDemReader.cs](Services/TiffDemReader.cs)**: Decodes scanline and tiled TIFFs into row-major float arrays. Implements `TagExtender` for custom GeoTIFF/GDAL tags. Arranges tiles by filename coordinates, tiepoints, or near-square alphabetical order.
 4. **[Services/DemProcessor.cs](Services/DemProcessor.cs)**: Pure static compute engine. Performs statistical analysis, void filling, seam smoothing, virtual mosaic indexing, bilinear resampling, preview bitmap rendering, 3D mesh/texture generation, and file export.

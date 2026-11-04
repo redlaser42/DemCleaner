@@ -29,10 +29,11 @@
 
 ## What It Does
 
-- **Multi-Tile Mosaic & Auto-Arrangement**: Drag and drop a folder of GeoTIFF elevation tiles. DEM Cleaner arranges them into a continuous mosaic using filename coordinates or embedded geospatial metadata.
+- **Consistent Multi-Tile Normalization (0–1 Remapping)**: When working with multi-tile DEM datasets, individual `.tiff` files store real-world elevation in meters. Exporting them separately typically clips or misaligns height ranges, creating broken vertical steps between tiles. DEM Cleaner calculates the true collective min/max elevation bounds across all source tiles relevant to your export region, remapping meters into a synchronized, normalized 16-bit range ($0.0 \dots 1.0$) for perfect vertical alignment in Unreal and Unity.
+- **Multi-Tile Mosaic & Auto-Arrangement**: Drag and drop a folder of GeoTIFF elevation tiles. DEM Cleaner arranges them into an interactive continuous mosaic using filename coordinates or embedded geospatial metadata.
 - **Void Detection & Repair**: Catches NoData holes, ocean cutouts, and sentinel values. Fill them with your choice of Minimum, Maximum, Mean, or smooth Laplace interpolation.
 - **Seam Smoothing**: Eliminates visible elevation steps and harsh seams along tile boundaries with non-destructive feathering.
-- **Interactive 2D & 3D Viewports**: Inspect your terrain in a full 2D mosaic view, examine individual tiles with red void overlays, or explore a hardware-accelerated 3D preview with adjustable sun angles and topographic color ramps.
+- **Interactive 2D & 3D Viewports**: Inspect your terrain in a full 2D mosaic view or explore a hardware-accelerated 3D preview with adjustable sun angles, wireframe overlays, and hypsometric color ramps.
 - **Custom Crop & Sub-Tile Splitting**: Draw a custom region box to export only the area you need. Split the output into a single merged heightmap, the original tile grid, or custom subdivided tiles.
 - **Engine-Ready Presets**: Export directly to standard landscape dimensions for **Unreal Engine** (8129, 4033, 2017) or **Unity** (4097, 2049, 1025) as 16-bit grayscale PNG or 32-bit float GeoTIFF.
 
@@ -47,13 +48,6 @@ View your entire dataset at once with instant stats for tile count, void pixels,
   <img src="images/preview-grid-layout.png" alt="2D Mosaic Layout" width="90%" />
 </p>
 
-### Single Tile Inspector
-Examine individual tiles up close with before/after comparison views, red void highlighting, and per-tile elevation histograms.
-
-<p align="center">
-  <img src="images/preview-inspection.png" alt="Tile Inspector" width="90%" />
-</p>
-
 ### Hardware-Accelerated 3D Visualizer
 Check slope transitions, lighting, and terrain contours before export. Supports multiple color ramps, wireframe overlays, and elevation exaggeration.
 
@@ -61,8 +55,8 @@ Check slope transitions, lighting, and terrain contours before export. Supports 
   <img src="images/preview-3d-visualizer.png" alt="3D Terrain Visualizer" width="90%" />
 </p>
 
-### Custom Region Crop
-Crop any square area with real-time ground distance, effective meters-per-pixel readouts, and a human-scale reference.
+### Custom Region Crop & Scale Reference
+Crop any square area with real-time ground distance, effective meters-per-pixel readouts, and a human-scale reference to evaluate terrain resolution against a real-world figure.
 
 <p align="center">
   <img src="images/preview-custom-region.png" alt="Custom Region Selection" width="90%" />
@@ -87,7 +81,7 @@ Crop any square area with real-time ground distance, effective meters-per-pixel 
 2. **Clean**: Choose a void fill method (e.g., *Interpolated* for terrain holes, *Minimum* for sea level).
 3. **Smooth**: Adjust the seam smoothing slider to blend adjacent tile borders.
 4. **Crop & Size**: Pick your target resolution preset (Unreal, Unity, or custom size).
-5. **Export**: Click **Export Heightmap(s)** to write clean 16-bit PNGs or GeoTIFFs to your output folder.
+5. **Export**: Click **Export Heightmap(s)** to write clean, normalized 16-bit PNGs or GeoTIFFs to your output folder.
 
 ---
 
