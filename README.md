@@ -1,7 +1,7 @@
 # DEM Cleaner
 
 <p align="center">
-  <img src="images/icon2.ico" alt="DEM Cleaner Logo" width="96" height="96" />
+  <img src="images/icon.png" alt="DEM Cleaner Logo" width="104" height="104" />
 </p>
 
 <p align="center">
@@ -18,186 +18,80 @@
 </p>
 
 <p align="center">
-  <img src="images/preview-grid-layout.png" alt="DEM Cleaner 2D Grid Layout Workspace" width="100%" />
+  <img src="images/preview-grid-layout.png" alt="DEM Cleaner Workspace" width="100%" />
 </p>
 
 ---
 
-**DEM Cleaner** is a Windows desktop application by **Sipp Studio** for importing, inspecting, repairing, stitching, previewing, cropping, and exporting digital elevation model (DEM) data. It bridges the gap between real-world GIS elevation sources (USGS 3DEP, Copernicus, LiDAR) and game engines / DCC tools like **Unreal Engine 5**, **Unity**, **Gaea**, **World Creator**, **Blender**, and **Houdini**.
+**DEM Cleaner** is a Windows desktop tool for inspecting, repairing, stitching, previewing, and exporting digital elevation model (DEM) datasets. It bridges the gap between real-world GIS elevation data (USGS 3DEP, Copernicus, LiDAR) and game engines or DCC applications like **Unreal Engine 5**, **Unity**, **Blender**, **Gaea**, and **Houdini**.
 
 ---
 
-## ⚡ At a Glance
+## What It Does
 
-| Stage | Capabilities |
-| :--- | :--- |
-| **Import & Arrange** | Multi-tile GeoTIFF loading, automatic USGS 1m coordinate detection, tiepoint georeferencing, and scanline/tiled TIFF support. |
-| **Clean & Void Fill** | NoData detection (sentinel bounds, GDAL tags, IEEE `NaN`/inf) with 4 filling modes: Minimum, Maximum, Mean, and SOR Laplace interpolation. |
-| **Seam Smoothing** | Non-destructive between-tile boundary feathering and multi-step relaxation to remove tile edge steps and elevation tears. |
-| **Inspect & Preview** | Real-time 2D mosaic pan/zoom, before/after difference inspection, red void overlays, and GPU Direct3D 3D terrain preview. |
-| **Custom Crop & Split** | Interactive square crop gizmo with live scale bar and human-scale reference. Split output as 1×1 merged, original tile grid, or custom $N \times N$. |
-| **Engine-Ready Export** | Optimized presets for **Unreal Engine Landscape** (8129, 4033, 2017), **Unity Terrain** (4097, 2049, 1025), and Power-of-Two (8192, 4096, 2048). Outputs Gray16 PNG or GeoTIFF. |
+- **Multi-Tile Mosaic & Auto-Arrangement**: Drag and drop a folder of GeoTIFF elevation tiles. DEM Cleaner arranges them into a continuous mosaic using filename coordinates or embedded geospatial metadata.
+- **Void Detection & Repair**: Catches NoData holes, ocean cutouts, and sentinel values. Fill them with your choice of Minimum, Maximum, Mean, or smooth Laplace interpolation.
+- **Seam Smoothing**: Eliminates visible elevation steps and harsh seams along tile boundaries with non-destructive feathering.
+- **Interactive 2D & 3D Viewports**: Inspect your terrain in a full 2D mosaic view, examine individual tiles with red void overlays, or explore a hardware-accelerated 3D preview with adjustable sun angles and topographic color ramps.
+- **Custom Crop & Sub-Tile Splitting**: Draw a custom region box to export only the area you need. Split the output into a single merged heightmap, the original tile grid, or custom subdivided tiles.
+- **Engine-Ready Presets**: Export directly to standard landscape dimensions for **Unreal Engine** (8129, 4033, 2017) or **Unity** (4097, 2049, 1025) as 16-bit grayscale PNG or 32-bit float GeoTIFF.
 
 ---
 
-## 📸 Interface & Workflow Highlights
+## Visual Tour
 
-### 1. 2D Mosaic & Telemetry Overview
-Import single files or entire directories. DEM Cleaner automatically positions tiles into an interactive continuous mosaic using filename coordinate metadata or geospatial tags. The stationary telemetry ribbon displays instant metrics across the entire dataset: loaded tile counts, void pixel totals, elevation ranges ($\Delta Z$), and min/max bounds.
+### 2D Mosaic & Telemetry
+View your entire dataset at once with instant stats for tile count, void pixels, elevation span ($\Delta Z$), and physical real-world coverage.
 
 <p align="center">
-  <img src="images/preview-grid-layout.png" alt="2D Mosaic and Grid Layout" width="90%" />
+  <img src="images/preview-grid-layout.png" alt="2D Mosaic Layout" width="90%" />
 </p>
 
-### 2. Deep Tile Inspection & Void Analysis
-Switch to the **Individual Tile Inspector** to examine individual elevation tiles with side-by-side or single-tile views. Identify missing elevation values with high-contrast red void overlays, inspect per-tile elevation histograms, and apply per-tile fill overrides when local conditions require specialized handling.
+### Single Tile Inspector
+Examine individual tiles up close with before/after comparison views, red void highlighting, and per-tile elevation histograms.
 
 <p align="center">
-  <img src="images/preview-inspection.png" alt="Individual Tile Inspector" width="90%" />
+  <img src="images/preview-inspection.png" alt="Tile Inspector" width="90%" />
 </p>
 
-### 3. Interactive Hardware-Accelerated 3D Visualizer
-Preview your repaired terrain in an interactive 3D viewport powered by WPF Direct3D. Evaluate slope transitions and seam blending under customizable sun angles and light intensities. Choose from multiple hypsometric palettes (Hypsometric, Grayscale, Alpine, Desert), adjust elevation exaggeration ($Z$-scale), and toggle optional wireframe or water plane overlays.
+### Hardware-Accelerated 3D Visualizer
+Check slope transitions, lighting, and terrain contours before export. Supports multiple color ramps, wireframe overlays, and elevation exaggeration.
 
 <p align="center">
-  <img src="images/preview-3d-visualizer.png" alt="Interactive 3D Visualizer" width="90%" />
+  <img src="images/preview-3d-visualizer.png" alt="3D Terrain Visualizer" width="90%" />
 </p>
 
-> [!NOTE]
-> The 3D viewer supports preview quality tiers from **1K** up to **16K**. The 16K tier maximizes mesh density and sampling fidelity for terrain evaluation (the preview viewport texture itself is capped at 8192×8192 for GPU stability).
-
-### 4. Custom Region Crop & Dynamic Scale Matrix
-Crop exactly the terrain footprint your project needs using an interactive square crop box with center gizmo, edge handles, and real-time dimension readouts. The viewport features an adaptive distance scale bar and a human-scale silhouette ($1.80\,\text{m}$) to give immediate real-world perspective.
+### Custom Region Crop
+Crop any square area with real-time ground distance, effective meters-per-pixel readouts, and a human-scale reference.
 
 <p align="center">
-  <img src="images/preview-custom-region.png" alt="Custom Region Selection Gizmo" width="90%" />
+  <img src="images/preview-custom-region.png" alt="Custom Region Selection" width="90%" />
 </p>
 
-### 5. Production Game Engine Presets
-Avoid manual heightmap math. DEM Cleaner features built-in resolution preset matrices specifically calibrated for game engine landscape components and terrain systems.
+---
 
-<p align="center">
-  <img src="images/preview-export-settings.png" alt="Export Settings & Resolution Presets" width="45%" />
-</p>
+## Getting Started
 
-| Workflow Target | Recommended Preset Resolutions | Output Format |
-| :--- | :--- | :--- |
-| **Unreal Engine 5** | `8129 × 8129`, `4033 × 4033`, `2017 × 2017`, `1009 × 1009`, `505 × 505` | 16-bit Grayscale PNG |
-| **Unity Terrain** | `4097 × 4097`, `2049 × 2049`, `1025 × 1025`, `513 × 513` | 16-bit Grayscale PNG / RAW |
-| **Power-of-Two (DCC)** | `8192 × 8192`, `4096 × 4096`, `2048 × 2048`, `1024 × 1024` | 16-bit PNG / GeoTIFF |
-| **GIS / Scientific** | Source native resolution or custom dimensions | 32-bit Float GeoTIFF |
+### Requirements
+- **OS**: Windows 10 or Windows 11 (64-bit)
+- **Runtime**: [.NET 8.0 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
+- **GPU**: DirectX 9+ compatible GPU for 3D preview
+
+### Installation
+1. Download the latest release from the [Releases](https://github.com/sippstudio/dem-cleaner/releases) page (`DemCleaner-v1.0.0-win-x64.zip`).
+2. Extract the archive to any folder.
+3. Run `DemCleaner.exe`.
+
+### Basic Workflow
+1. **Import**: Drag and drop `.tif` / `.tiff` DEM tiles into the app.
+2. **Clean**: Choose a void fill method (e.g., *Interpolated* for terrain holes, *Minimum* for sea level).
+3. **Smooth**: Adjust the seam smoothing slider to blend adjacent tile borders.
+4. **Crop & Size**: Pick your target resolution preset (Unreal, Unity, or custom size).
+5. **Export**: Click **Export Heightmap(s)** to write clean 16-bit PNGs or GeoTIFFs to your output folder.
 
 ---
 
-## 🛠️ Core Algorithms & Processing Capabilities
-
-### Void Detection
-Real-world DEMs frequently contain water bodies, cloud occlusions, or sensor dropouts represented by missing values. DEM Cleaner identifies voids through three simultaneous filters:
-1. **IEEE Non-Finite Values**: Catches `NaN`, `+Infinity`, and `-Infinity` floating-point values.
-2. **Sentinel Extremes**: Detects standard GIS sentinel values ($\le -1\times 10^{30}$ and $\ge 1\times 10^{30}$).
-3. **GDAL / GeoTIFF Tags & Custom Thresholds**: Reads embedded tag `42113` (NoData string) or applies user-specified numeric comparisons (`≤`, `=`, `≥`).
-
-### 4 Void Filling Modes
-- **Minimum**: Replaces voids with the dataset or tile minimum valid elevation. Ideal for ocean basins or low-lying water bodies.
-- **Maximum**: Sets voids to peak elevations.
-- **Mean**: Sets voids to average local elevation.
-- **Interpolated (Gauss-Seidel SOR Laplace)**: Seeds void perimeters from adjacent valid data and iteratively solves Laplace's equation using Successive Over-Relaxation (SOR) with an acceleration factor $\omega = 1.35$. Produces smooth, continuous transitions across complex holes.
-
-### Non-Destructive Seam Smoothing
-Neighboring DEM tiles often exhibit subtle edge offsets due to differing acquisition times, projection sampling, or datum variations. DEM Cleaner's seam-smoothing pipeline feathers elevation differences across adjacent borders using smoothstep transitions and cross-boundary relaxation. 
-
-> [!TIP]
-> Smoothing is non-destructive: the original void-filled state is cached in `BaseFilledData`, allowing you to adjust seam smoothing steps repeatedly without compounding edits.
-
----
-
-## 🚀 Getting Started
-
-### System Requirements
-- **Operating System**: Windows 10 or Windows 11 (64-bit).
-- **Runtime**: [Microsoft .NET 8.0 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0).
-- **GPU**: DirectX 9 / Direct3D compatible GPU for hardware-accelerated 3D preview.
-- **Memory**: 8 GB RAM minimum; 16+ GB recommended for large multi-tile 1-meter DEM mosaics.
-
-### Download & Run (Packaged Release)
-1. Go to the [Releases](https://github.com/sippstudio/dem-cleaner/releases) page.
-2. Download the latest `DemCleaner-v1.0.0-win-x64.zip`.
-3. Extract the ZIP archive to a folder of your choice.
-4. Launch `DemCleaner.exe`.
-
-### Build from Source
-Requires the [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) with Windows Desktop workload.
-
-```powershell
-# Clone the repository
-git clone https://github.com/sippstudio/dem-cleaner.git
-cd dem-cleaner
-
-# Compile Release build
-dotnet build DemCleaner.csproj -c Release
-
-# Run the application
-./bin/Release/net8.0-windows/DemCleaner.exe
-```
-
-> [!NOTE]
-> Always compile with `-c Release`. The `Debug` configuration includes a post-build hook configured for local Visual Studio debugging that auto-launches the GUI.
-
----
-
-## 📖 Step-by-Step Workflow
-
-```mermaid
-flowchart LR
-    A["1. Import GeoTIFF Tiles"] --> B["2. Detect & Fill Voids"]
-    B --> C["3. Smooth Tile Seams"]
-    C --> D["4. 2D / 3D Preview"]
-    D --> E["5. Set Crop & Engine Preset"]
-    E --> F["6. Export 16-Bit Heightmaps"]
-```
-
-1. **Import**: Drag and drop `.tif` / `.tiff` DEM files into the window or click **Browse Files** / **Browse Folder**.
-2. **Review Layout**: Confirm the automatic grid arrangement. Re-order grid columns/rows in the bottom table if dealing with non-standard naming schemes.
-3. **Configure Void Repair**: Select your preferred void filling algorithm (e.g., *Interpolated* for missing terrain patches or *Minimum* for sea-level voids).
-4. **Smooth Seams**: Adjust the seam smoothing steps slider while observing boundaries in the 2D viewer or 3D visualizer.
-5. **Crop & Select Resolution**: Check **Enable Custom Area Selection** to crop a square region, or export the entire merged mosaic. Choose an Unreal Engine, Unity, or Power-of-Two preset.
-6. **Export**: Review the generated filenames, coordinates, and normalization ranges in the **EXPECTED OUTPUT FILES** tab, then click **Export Heightmap(s)**.
-
----
-
-## 🎨 Built-in Color Themes
-
-Customize the editor to match your studio workflow or lighting environment via the ⚙ (Settings) button in the top-right header:
-- **Sage & Sandstone** (Default balanced earth tone)
-- **Topo Buckskin & Olive** (Warm cartographic palette)
-- **Canyon & Pine** (High-contrast outdoor motif)
-- **Forest Canopy** (Deep woodland theme)
-- **Desert Mesa** (Warm arid gradient)
-- **Midnight Slate** (Dark low-fatigue studio theme)
-
----
-
-## 🛠️ Repository & Developer Utilities
-
-| Path / Tool | Purpose |
-| :--- | :--- |
-| [`scripts/build-release.ps1`](scripts/build-release.ps1) | One-command release packaging script. Publishes the app, runs self-tests, copies licenses, and creates `release/DemCleaner-v<version>-win-x64.zip`. |
-| [`scripts/capture-screenshots.ps1`](scripts/capture-screenshots.ps1) | Win32 utility to automatically capture high-resolution window screenshots of running DEM Cleaner views. |
-| [`images/README.md`](images/README.md) | Visual asset documentation detailing screenshot dimensions, target tabs, and update procedures. |
-| [AGENTS.md](AGENTS.md) | Architectural invariants, Git safety rules, and operational guidelines for AI coding agents. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | In-depth technical architecture, memory model, and algorithm specifications. |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | Development environment setup, test execution, and debugging guides. |
-
-### Running the Headless Smoke Test
-Verify basic assembly defaults and theme registrations:
-```powershell
-./bin/Release/net8.0-windows/DemCleaner.exe --self-test
-Get-Content ./bin/Release/net8.0-windows/selftest_result.txt
-```
-
----
-
-## 📄 License & Attribution
+## License & Credits
 
 **DEM Cleaner is proprietary software.**  
 Copyright © Sipp Studio. All rights reserved.
@@ -205,3 +99,5 @@ Copyright © Sipp Studio. All rights reserved.
 See [LICENSE.txt](LICENSE.txt) for licensing terms. Built with:
 - [.NET 8.0 WPF](https://github.com/dotnet/wpf)
 - [BitMiracle.LibTiff.NET](https://bitmiracle.com/libtiff/) (BSD-3-Clause)
+
+For technical architecture and developer documentation, see the [docs/](docs/) folder.
