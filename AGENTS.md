@@ -1,6 +1,6 @@
 # AGENTS.md — Operational Reference for AI Coding Agents
 
-This is the primary operational guide for AI coding agents working on **DEM Cleaner**. Read this document before investigating or modifying code. Consult [ARCHITECTURE.md](ARCHITECTURE.md) for system design, [DEVELOPMENT.md](DEVELOPMENT.md) for build and testing workflows, and [AI_WORKFLOW.md](AI_WORKFLOW.md) for model tier selection and handoffs.
+This is the primary operational guide for AI coding agents working on **DEM Cleaner**. Read this document before investigating or modifying code. Consult [ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design, [DEVELOPMENT.md](docs/DEVELOPMENT.md) for build and testing workflows, and [AI_WORKFLOW.md](docs/AI_WORKFLOW.md) for model tier selection and handoffs.
 
 ---
 
