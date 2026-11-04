@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using DemCleaner.Models;
@@ -397,5 +397,16 @@ public class NumericalDemAlgorithmTests
         Assert.AreEqual(settings.ExportStandardXyNaming, restored.ExportStandardXyNaming);
         Assert.AreEqual(settings.ExportPrefix, restored.ExportPrefix);
         Assert.AreEqual(settings.ExportSuffix, restored.ExportSuffix);
+    }
+    [TestMethod]
+    public void DeriveLocationName_ExtractsUsgsPatternCorrectly()
+    {
+        string filename = @"C:\Data\USGS_1M_10_x56y475_OR_SouthEast_D22.tif";
+        string result = TiffDemReader.DeriveLocationName(filename);
+        Assert.AreEqual("OR_SouthEast_D22", result);
+
+        string generic = @"C:\ElevationData\CraterLake\Tile_001.tif";
+        string resultGeneric = TiffDemReader.DeriveLocationName(generic);
+        Assert.AreEqual("CraterLake", resultGeneric);
     }
 }
