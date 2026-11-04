@@ -545,4 +545,53 @@ public static class TiffDemReader
 
         return false;
     }
+
+    /// <summary>
+    /// Derives a location-specific export folder name from the source DEM file path or USGS naming pattern (e.g. "USGS_1M_10_x56y475_OR_SouthEast_D22" -> "OR_SouthEast_D22").
+    /// </summary>
+    public static string DeriveLocationName(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return "Exported_16Bit_PNG";
+
+        string nameNoExt = Path.GetFileNameWithoutExtension(filePath);
+
+        // 1. Explicit USGS naming convention: USGS_1M_10_x56y475_OR_SouthEast_D22 or USGS_1M_x56y475_OR_SouthEast_D22
+        var usgsMatch = Regex.Match(nameNoExt, @"USGS_(?:1M|1m|NED|2M|10M)(?:_\d{1,2})?_[xX]\d+[yY]\d+_(.+)", RegexOptions.IgnoreCase);
+        if (usgsMatch.Success && !string.IsNullOrWhiteSpace(usgsMatch.Groups[1].Value))
+        {
+            return usgsMatch.Groups[1].Value.Trim();
+        }
+
+        // 2. Coordinate prefix convention: e.g. x56y475_LocationName or x56_y475_LocationName
+        var coordMatch = Regex.Match(nameNoExt, @"[xX]\d+[_\-]?[yY]\d+_(.+)", RegexOptions.IgnoreCase);
+        if (coordMatch.Success && !string.IsNullOrWhiteSpace(coordMatch.Groups[1].Value))
+        {
+            return coordMatch.Groups[1].Value.Trim();
+        }
+
+        // 3. Fallback: Check parent directory name if meaningful
+        string? dir = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(dir))
+        {
+            string dirName = Path.GetFileName(dir);
+            if (!string.IsNullOrWhiteSpace(dirName) &&
+                !dirName.Equals("ExportedPngs", StringComparison.OrdinalIgnoreCase) &&
+                !dirName.Equals("bin", StringComparison.OrdinalIgnoreCase))
+            {
+                return dirName;
+            }
+        }
+
+        return "Exported_16Bit_PNG";
+    }
+
+    /// <summary>
+    /// Derives a location-specific export folder name from the loaded tiles collection.
+    /// </summary>
+    public static string DeriveLocationName(IEnumerable<DemTile> tiles)
+    {
+        var first = tiles.FirstOrDefault();
+        return first != null ? DeriveLocationName(first.FilePath) : "Exported_16Bit_PNG";
+    }
 }

@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -293,6 +293,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RefreshTileIndices()
+    {
+        for (int idx = 0; idx < _tiles.Count; idx++)
+        {
+            _tiles[idx].Index = idx + 1;
+        }
+    }
+
     private DemProcessingOptions ReadOptionsFromUi()
     {
         var options = new DemProcessingOptions
@@ -391,6 +399,7 @@ public partial class MainWindow : Window
     {
         if (_isBusy) return;
         _tiles.Clear();
+        RefreshTileIndices();
         _exportNormX0 = 0.0;
         _exportNormY0 = 0.0;
         _exportNormX1 = 1.0;
@@ -408,6 +417,7 @@ public partial class MainWindow : Window
         if (sender is Button { Tag: DemTile tileToRemove } && _tiles.Contains(tileToRemove))
         {
             _tiles.Remove(tileToRemove);
+            RefreshTileIndices();
 
             if (_tiles.Count == 0)
             {
@@ -591,6 +601,7 @@ public partial class MainWindow : Window
             if (!append)
             {
                 _tiles.Clear();
+                RefreshTileIndices();
                 _exportNormX0 = 0.0;
                 _exportNormY0 = 0.0;
                 _exportNormX1 = 1.0;
@@ -618,6 +629,7 @@ public partial class MainWindow : Window
             foreach (var tile in loadedTiles)
             {
                 _tiles.Add(tile);
+                RefreshTileIndices();
             }
 
             // If designated export folder hasn't been customized yet, default to a subfolder next to the first loaded tile
@@ -626,7 +638,8 @@ public partial class MainWindow : Window
                 string? firstDir = Path.GetDirectoryName(_tiles[0].FilePath);
                 if (!string.IsNullOrEmpty(firstDir))
                 {
-                    TxtExportFolder.Text = Path.Combine(firstDir, "Exported_16Bit_PNG");
+                    string locationName = TiffDemReader.DeriveLocationName(_tiles);
+                    TxtExportFolder.Text = Path.Combine(firstDir, locationName);
                 }
             }
 
@@ -826,6 +839,21 @@ public partial class MainWindow : Window
             double physicalWidthMeters = _exportAreaStats.PixelWidth * metersPerPixel;
             double physicalHeightMeters = _exportAreaStats.PixelHeight * metersPerPixel;
             TxtGlobalGridWidth.Text = $"{physicalWidthMeters:N0}m × {physicalHeightMeters:N0}m";
+            if (isCustom)
+            {
+                var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+                var (gridR, gridC) = GetNewExportGridDimensionsFromUi();
+                int totalExportPxW = fileW * gridC;
+                double zonePhysicalMetersW = _exportAreaStats.PixelWidth * metersPerPixel;
+                double effectiveExportMpp = totalExportPxW > 0 ? (zonePhysicalMetersW / totalExportPxW) : metersPerPixel;
+                if (TxtMetersPerPixelLabel != null) TxtMetersPerPixelLabel.Text = "EXPORT AREA METERS/PX";
+                if (TxtSourceMetersPerPixel != null) TxtSourceMetersPerPixel.Text = $"{effectiveExportMpp:0.##} m/px (Src: {metersPerPixel:0.##})";
+            }
+            else
+            {
+                if (TxtMetersPerPixelLabel != null) TxtMetersPerPixelLabel.Text = "SOURCE DATA METERS/PX";
+                if (TxtSourceMetersPerPixel != null) TxtSourceMetersPerPixel.Text = $"{metersPerPixel:0.##} m/px";
+            }
         }
 
         if (_matchNativeExportResolution)
@@ -959,9 +987,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Builds the 2D Tile Grid Mosaic flush to the left/top edges of the viewport with Global X/Y coordinate
-    /// scale legend badges overlaid directly onto the grid cells, plus an interactive overlay canvas
-    /// that lets the user drag to redefine the Export Area anywhere over the grid.
+    /// Builds the 2D Tile Grid Mosaic reframed so all tiles fit neatly in the viewport when fully zoomed out,
+    /// enclosed by a left and bottom graticule neatline border showing length in pixels and distance in meters at each tile edge,
+    /// plus an interactive overlay canvas for custom export regions.
     /// </summary>
     private void RebuildMosaicGrid()
     {
@@ -976,12 +1004,21 @@ public partial class MainWindow : Window
         int rows = mosaic.GridRows;
         int cols = mosaic.GridCols;
 
-        // Calculate proportional viewport pixel dimensions for each column and row using a uniform scale
-        double targetMaxDim = Math.Clamp(Math.Max(rows, cols) * 235.0, 380.0, 960.0);
-        int minCellNativeDim = Math.Max(1, Math.Min(mosaic.ColWidths.Min(), mosaic.RowHeights.Min()));
-        double displayScale = Math.Max(
-            targetMaxDim / Math.Max(1, Math.Max(mosaic.TotalWidth, mosaic.TotalHeight)),
-            95.0 / minCellNativeDim);
+        // Calculate available viewport space accounting for ScrollViewer padding and graticule border
+        double padH = SvGridMosaic.Padding.Left + SvGridMosaic.Padding.Right;
+        double padV = SvGridMosaic.Padding.Top + SvGridMosaic.Padding.Bottom;
+        double availW = SvGridMosaic.ActualWidth > 100 ? SvGridMosaic.ActualWidth - padH : 640.0;
+        double availH = SvGridMosaic.ActualHeight > 100 ? SvGridMosaic.ActualHeight - padV : 440.0;
+
+        const double graticuleLeftW = 56.0;
+        const double graticuleBottomH = 34.0;
+        const double frameMargin = 20.0;
+
+        double maxMosaicW = Math.Max(120.0, availW - graticuleLeftW - frameMargin);
+        double maxMosaicH = Math.Max(120.0, availH - graticuleBottomH - frameMargin);
+
+        double displayScale = Math.Min(maxMosaicW / Math.Max(1, mosaic.TotalWidth), maxMosaicH / Math.Max(1, mosaic.TotalHeight));
+        displayScale = Math.Max(displayScale, 0.0001);
 
         _colDispWidths = new double[cols];
         for (int c = 0; c < cols; c++)
@@ -998,6 +1035,30 @@ public partial class MainWindow : Window
         _mosaicCanvasWidth = Math.Max(1.0, _colDispWidths.Sum());
         _mosaicCanvasHeight = Math.Max(1.0, _rowDispHeights.Sum());
 
+        // GrdMosaicWithHeaders: Col 0 = Left Graticule, Col 1 = Mosaic; Row 0 = Mosaic, Row 1 = Bottom Graticule
+        GrdMosaicWithHeaders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(graticuleLeftW, GridUnitType.Pixel) });
+        GrdMosaicWithHeaders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(_mosaicCanvasWidth, GridUnitType.Pixel) });
+
+        GrdMosaicWithHeaders.RowDefinitions.Add(new RowDefinition { Height = new GridLength(_mosaicCanvasHeight, GridUnitType.Pixel) });
+        GrdMosaicWithHeaders.RowDefinitions.Add(new RowDefinition { Height = new GridLength(graticuleBottomH, GridUnitType.Pixel) });
+
+        var grdTileMosaic = new Grid
+        {
+            Width = _mosaicCanvasWidth,
+            Height = _mosaicCanvasHeight,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+
+        for (int r = 0; r < rows; r++)
+        {
+            grdTileMosaic.RowDefinitions.Add(new RowDefinition { Height = new GridLength(_rowDispHeights[r], GridUnitType.Pixel) });
+        }
+        for (int c = 0; c < cols; c++)
+        {
+            grdTileMosaic.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(_colDispWidths[c], GridUnitType.Pixel) });
+        }
+
         _mosaicOverlayCanvas = new Canvas
         {
             Width = _mosaicCanvasWidth,
@@ -1010,18 +1071,6 @@ public partial class MainWindow : Window
         _mosaicOverlayCanvas.MouseMove += MosaicOverlayCanvas_MouseMove;
         _mosaicOverlayCanvas.MouseLeftButtonUp += MosaicOverlayCanvas_MouseLeftButtonUp;
         _mosaicOverlayCanvas.MouseLeave += MosaicOverlayCanvas_MouseLeave;
-
-        // Rows 0..rows-1 = Tile Rows (flush to top & left with overlaid scale/coordinate legend badges)
-        for (int r = 0; r < rows; r++)
-        {
-            GrdMosaicWithHeaders.RowDefinitions.Add(new RowDefinition { Height = new GridLength(_rowDispHeights[r], GridUnitType.Pixel) });
-        }
-
-        // Cols 0..cols-1 = Tile Columns
-        for (int c = 0; c < cols; c++)
-        {
-            GrdMosaicWithHeaders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(_colDispWidths[c], GridUnitType.Pixel) });
-        }
 
         var bgWellBrush = (Brush)Resources["ThemeBgWell"];
         var bgCardBrush = (Brush)Resources["ThemeBgCard"];
@@ -1037,7 +1086,6 @@ public partial class MainWindow : Window
             .GroupBy(t => (t.GridRow, t.GridCol))
             .ToDictionary(g => g.Key, g => g.First());
 
-        // Populate Tile Cells directly at [r, c] with overlaid coordinate scale legend badges
         // Reset 2D Grid zoom scale when loading or rebuilding mosaic
         if (ScaleGridMosaic != null)
         {
@@ -1045,7 +1093,7 @@ public partial class MainWindow : Window
             ScaleGridMosaic.ScaleY = 1.0;
         }
 
-        // Populate Tile Cells directly at [r, c] with restyled map grid legends and bottom-corner coordinate badges
+        // Populate Tile Cells directly at [r, c] (Col and Row header badges removed; slot badge retained in corner)
         for (int r = 0; r < rows; r++)
         {
             for (int c = 0; c < cols; c++)
@@ -1077,7 +1125,7 @@ public partial class MainWindow : Window
                         BorderThickness = new Thickness(0.75),
                         CornerRadius = new CornerRadius(4),
                         Padding = new Thickness(5, 2, 5, 2),
-                        Margin = new Thickness(5, r == 0 ? 27 : 5, 5, 5),
+                        Margin = new Thickness(5),
                         HorizontalAlignment = HorizontalAlignment.Left,
                         VerticalAlignment = VerticalAlignment.Top,
                         IsHitTestVisible = false
@@ -1092,87 +1140,6 @@ public partial class MainWindow : Window
                     };
                     labelBorder.Child = labelText;
                     cellGrid.Children.Add(labelBorder);
-
-                    // Restyled Column Header (Centered across column on top row, styled like a map grid legend)
-                    if (r == 0)
-                    {
-                        string colLabel = !string.IsNullOrEmpty(tile.ColCoordinateLabel) ? tile.ColCoordinateLabel : $"x{c}";
-                        var colOverlayBadge = new Border
-                        {
-                            Background = new SolidColorBrush(Color.FromArgb(220, 12, 18, 14)),
-                            BorderBrush = new SolidColorBrush(Color.FromArgb(150, 232, 168, 73)),
-                            BorderThickness = new Thickness(1),
-                            CornerRadius = new CornerRadius(4),
-                            Padding = new Thickness(8, 2.5, 8, 2.5),
-                            Margin = new Thickness(0, 3, 0, 0),
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            VerticalAlignment = VerticalAlignment.Top,
-                            IsHitTestVisible = false
-                        };
-
-                        var colPanel = new StackPanel { Orientation = Orientation.Horizontal };
-                        colPanel.Children.Add(new TextBlock
-                        {
-                            Text = $"COL {c}",
-                            Foreground = accentPrimaryBrush,
-                            FontSize = 9.5,
-                            FontWeight = FontWeights.Bold
-                        });
-                        colPanel.Children.Add(new TextBlock
-                        {
-                            Text = " \u2022 ",
-                            Foreground = textMutedBrush,
-                            FontSize = 9.5
-                        });
-                        colPanel.Children.Add(new TextBlock
-                        {
-                            Text = colLabel,
-                            Foreground = Brushes.White,
-                            FontSize = 9.5,
-                            FontWeight = FontWeights.SemiBold
-                        });
-                        colOverlayBadge.Child = colPanel;
-                        cellGrid.Children.Add(colOverlayBadge);
-                    }
-
-                    // Restyled Row Header (Centered vertically on left edge of first column, styled like a map grid legend)
-                    if (c == 0)
-                    {
-                        string rowLabel = !string.IsNullOrEmpty(tile.RowCoordinateLabel) ? tile.RowCoordinateLabel : $"y{r}";
-                        var rowOverlayBadge = new Border
-                        {
-                            Background = new SolidColorBrush(Color.FromArgb(220, 12, 18, 14)),
-                            BorderBrush = new SolidColorBrush(Color.FromArgb(150, 232, 168, 73)),
-                            BorderThickness = new Thickness(1),
-                            CornerRadius = new CornerRadius(4),
-                            Padding = new Thickness(6, 4, 6, 4),
-                            Margin = new Thickness(3, 0, 0, 0),
-                            HorizontalAlignment = HorizontalAlignment.Left,
-                            VerticalAlignment = VerticalAlignment.Center,
-                            IsHitTestVisible = false
-                        };
-
-                        var rowPanel = new StackPanel { Orientation = Orientation.Vertical, HorizontalAlignment = HorizontalAlignment.Center };
-                        rowPanel.Children.Add(new TextBlock
-                        {
-                            Text = $"ROW {r}",
-                            Foreground = accentPrimaryBrush,
-                            FontSize = 9,
-                            FontWeight = FontWeights.Bold,
-                            HorizontalAlignment = HorizontalAlignment.Center
-                        });
-                        rowPanel.Children.Add(new TextBlock
-                        {
-                            Text = rowLabel,
-                            Foreground = Brushes.White,
-                            FontSize = 9,
-                            FontWeight = FontWeights.SemiBold,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            Margin = new Thickness(0, 1, 0, 0)
-                        });
-                        rowOverlayBadge.Child = rowPanel;
-                        cellGrid.Children.Add(rowOverlayBadge);
-                    }
 
                     // Bottom-Right Corner: 0x0y, 1x0y Tile Coordinate Slot Badge
                     var slotBadge = new Border
@@ -1209,7 +1176,7 @@ public partial class MainWindow : Window
                     };
                     Grid.SetRow(cellBorder, r);
                     Grid.SetColumn(cellBorder, c);
-                    GrdMosaicWithHeaders.Children.Add(cellBorder);
+                    grdTileMosaic.Children.Add(cellBorder);
                 }
                 else
                 {
@@ -1231,21 +1198,196 @@ public partial class MainWindow : Window
                     };
                     Grid.SetRow(emptyCell, r);
                     Grid.SetColumn(emptyCell, c);
-                    GrdMosaicWithHeaders.Children.Add(emptyCell);
+                    grdTileMosaic.Children.Add(emptyCell);
                 }
             }
         }
+
         Grid.SetRow(_mosaicOverlayCanvas, 0);
         Grid.SetColumn(_mosaicOverlayCanvas, 0);
         Grid.SetRowSpan(_mosaicOverlayCanvas, rows);
         Grid.SetColumnSpan(_mosaicOverlayCanvas, cols);
         Panel.SetZIndex(_mosaicOverlayCanvas, 20);
-        GrdMosaicWithHeaders.Children.Add(_mosaicOverlayCanvas);
+        grdTileMosaic.Children.Add(_mosaicOverlayCanvas);
+
+        Grid.SetRow(grdTileMosaic, 0);
+        Grid.SetColumn(grdTileMosaic, 1);
+        GrdMosaicWithHeaders.Children.Add(grdTileMosaic);
+
+        double mpp = GetMetersPerPixelFromUi();
+
+        // Left Graticule Neatline Border
+        var leftGraticule = BuildLeftGraticule(rows, mosaic, mpp);
+        Grid.SetRow(leftGraticule, 0);
+        Grid.SetColumn(leftGraticule, 0);
+        GrdMosaicWithHeaders.Children.Add(leftGraticule);
+
+        // Bottom Graticule Neatline Border
+        var bottomGraticule = BuildBottomGraticule(cols, mosaic, mpp);
+        Grid.SetRow(bottomGraticule, 1);
+        Grid.SetColumn(bottomGraticule, 1);
+        GrdMosaicWithHeaders.Children.Add(bottomGraticule);
+
+        // Bottom-Left Neatline Corner Box
+        var cornerBox = BuildGraticuleCornerBox();
+        Grid.SetRow(cornerBox, 1);
+        Grid.SetColumn(cornerBox, 0);
+        GrdMosaicWithHeaders.Children.Add(cornerBox);
 
         RenderExportAreaOverlay();
         Update2DScaleBar();
     }
 
+    private FrameworkElement BuildLeftGraticule(int rows, MosaicDescriptor mosaic, double mpp)
+    {
+        var graticuleGrid = new Grid
+        {
+            Width = 56.0,
+            Height = _mosaicCanvasHeight,
+            Background = (Brush)Resources["ThemeBgWell"]
+        };
+
+        for (int r = 0; r < rows; r++)
+        {
+            graticuleGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(_rowDispHeights[r], GridUnitType.Pixel) });
+        }
+
+        var borderBrush = (Brush)Resources["ThemeBorderCard"];
+        var accentBrush = (Brush)Resources["ThemeAccentPrimary"];
+        var textPrimaryBrush = (Brush)Resources["ThemeTextPrimary"];
+
+        for (int r = 0; r < rows; r++)
+        {
+            int nativeH = mosaic.RowHeights[r];
+            double distMeters = nativeH * mpp;
+            string distStr = distMeters >= 1000.0 ? $"{(distMeters / 1000.0):0.#} km" : $"{distMeters:N0} m";
+
+            var cellBorder = new Border
+            {
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(0, 0, 1.2, r == rows - 1 ? 0 : 0.8),
+                Padding = new Thickness(2, 2, 4, 2)
+            };
+
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"{nativeH} px",
+                Foreground = accentBrush,
+                FontSize = 8.5,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = distStr,
+                Foreground = textPrimaryBrush,
+                FontSize = 8.0,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 1, 0, 0)
+            });
+
+            cellBorder.Child = stack;
+            Grid.SetRow(cellBorder, r);
+            graticuleGrid.Children.Add(cellBorder);
+        }
+
+        return graticuleGrid;
+    }
+
+    private FrameworkElement BuildBottomGraticule(int cols, MosaicDescriptor mosaic, double mpp)
+    {
+        var graticuleGrid = new Grid
+        {
+            Width = _mosaicCanvasWidth,
+            Height = 34.0,
+            Background = (Brush)Resources["ThemeBgWell"]
+        };
+
+        for (int c = 0; c < cols; c++)
+        {
+            graticuleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(_colDispWidths[c], GridUnitType.Pixel) });
+        }
+
+        var borderBrush = (Brush)Resources["ThemeBorderCard"];
+        var accentBrush = (Brush)Resources["ThemeAccentPrimary"];
+        var textPrimaryBrush = (Brush)Resources["ThemeTextPrimary"];
+
+        for (int c = 0; c < cols; c++)
+        {
+            int nativeW = mosaic.ColWidths[c];
+            double distMeters = nativeW * mpp;
+            string distStr = distMeters >= 1000.0 ? $"{(distMeters / 1000.0):0.#} km" : $"{distMeters:N0} m";
+
+            var cellBorder = new Border
+            {
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(0, 1.2, c == cols - 1 ? 0 : 0.8, 0),
+                Padding = new Thickness(2, 2, 2, 2)
+            };
+
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"{nativeW} px",
+                Foreground = accentBrush,
+                FontSize = 8.5,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = distStr,
+                Foreground = textPrimaryBrush,
+                FontSize = 8.0,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 1, 0, 0)
+            });
+
+            cellBorder.Child = stack;
+            Grid.SetColumn(cellBorder, c);
+            graticuleGrid.Children.Add(cellBorder);
+        }
+
+        return graticuleGrid;
+    }
+
+    private FrameworkElement BuildGraticuleCornerBox()
+    {
+        return new Border
+        {
+            Width = 56.0,
+            Height = 34.0,
+            Background = (Brush)Resources["ThemeBgWell"],
+            BorderBrush = (Brush)Resources["ThemeBorderCard"],
+            BorderThickness = new Thickness(0, 1.2, 1.2, 0),
+            Child = new TextBlock
+            {
+                Text = "px â€¢ m",
+                Foreground = (Brush)Resources["ThemeTextMuted"],
+                FontSize = 8.0,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+    }
     private void MosaicOverlayCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (_mosaicOverlayCanvas == null || _tiles.Count == 0) return;
@@ -1425,6 +1567,40 @@ public partial class MainWindow : Window
 
         // Lock bounding box to a 1:1 square aspect ratio
         double requestedSide = Math.Max(Math.Abs(dx), Math.Abs(dy));
+        // Light size snapping to active export resolution preset family
+        if (_tiles.Count > 0)
+        {
+            var mosaic = DemProcessor.BuildMosaicDescriptor(_tiles, _globalMin);
+            if (mosaic.TotalWidth > 0)
+            {
+                int[] basePresets = (CmbExportResolutionPresetSet?.SelectedIndex ?? 0) switch
+                {
+                    1 => new[] { 1009, 2017, 4033, 8129, 16129 },
+                    2 => new[] { 1025, 2049, 4097, 8193, 16385 },
+                    _ => new[] { 512, 1024, 2048, 4096, 8192, 16384 }
+                };
+                var (_, outC) = GetNewExportGridDimensionsFromUi();
+                int mult = Math.Max(1, outC);
+                foreach (int preset in basePresets)
+                {
+                    double snapCanvasSide1 = ((double)preset / mosaic.TotalWidth) * canvasW;
+                    if (Math.Abs(requestedSide - snapCanvasSide1) <= 12.0)
+                    {
+                        requestedSide = snapCanvasSide1;
+                        break;
+                    }
+                    if (mult > 1)
+                    {
+                        double snapCanvasSideGrid = ((double)(preset * mult) / mosaic.TotalWidth) * canvasW;
+                        if (Math.Abs(requestedSide - snapCanvasSideGrid) <= 12.0)
+                        {
+                            requestedSide = snapCanvasSideGrid;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         double maxSideX = signX >= 0 ? (canvasW - p0.X) : p0.X;
         double maxSideY = signY >= 0 ? (canvasH - p0.Y) : p0.Y;
         double maxAllowedSide = Math.Min(maxSideX, maxSideY);
@@ -1526,7 +1702,7 @@ public partial class MainWindow : Window
                 AddOverlayRect(rx1, ry0, w - rx1, rh, dimBrush);
         }
 
-        // 2. Interior subdivision grid lines when Custom Grid Size (R × C) is selected for new exports
+        // 2. Interior subdivision grid lines when Custom Grid Size (R Ã— C) is selected for new exports
         if (showSubGrid)
         {
             var subGridStroke = new SolidColorBrush(Color.FromArgb(185, 232, 168, 73));
@@ -1610,28 +1786,193 @@ public partial class MainWindow : Window
                 _mosaicOverlayCanvas.Children.Add(handle);
             }
 
-            // Floating Export Area Badge at bottom-right of selection
+            // Main EXPORT ZONE Header Badge
             var (resW, resH) = GetNewExportFileResolutionFromUi();
-            string gridTag = outRows == 1 && outCols == 1 ? "Single Image (1×1)" : $"{outRows}×{outCols} Export Grid";
+            double mpp = GetMetersPerPixelFromUi();
+            double zoneMW = _exportAreaStats.PixelWidth * mpp;
+            double zoneMH = _exportAreaStats.PixelHeight * mpp;
+            string zoneMStr = zoneMW >= 10000.0 || zoneMH >= 10000.0
+                ? $"{(zoneMW / 1000.0):0.##} × {(zoneMH / 1000.0):0.##} km"
+                : $"{zoneMW:N0} × {zoneMH:N0} m";
+
+            int totalExportPxW = resW * outCols;
+            double effectiveExportMpp = totalExportPxW > 0 ? (zoneMW / totalExportPxW) : mpp;
+
+            var panelStack = new StackPanel { Orientation = Orientation.Vertical, HorizontalAlignment = HorizontalAlignment.Center };
+            panelStack.Children.Add(new TextBlock
+            {
+                Text = showSubGrid ? $"EXPORT ZONE • {outRows}×{outCols} GRID ({outRows * outCols} TILES)" : "EXPORT ZONE • 1×1 SINGLE FILE",
+                Foreground = (Brush)Resources["ThemeAccentExport"],
+                FontSize = 9.5,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 2)
+            });
+            panelStack.Children.Add(new TextBlock
+            {
+                Text = $"Ground: {zoneMStr} • {effectiveExportMpp:0.##} m/px",
+                Foreground = Brushes.White,
+                FontSize = 9.0,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+            panelStack.Children.Add(new TextBlock
+            {
+                Text = showSubGrid ? $"Tile Res: {resW} × {resH} px/file" : $"Resolution: {resW} × {resH} px",
+                Foreground = (Brush)Resources["ThemeAccentPrimary"],
+                FontSize = 8.5,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+
             var badge = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(220, 18, 28, 22)),
+                Background = new SolidColorBrush(Color.FromArgb(235, 14, 20, 16)),
                 BorderBrush = outlineBrush,
                 BorderThickness = new Thickness(1.2),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(7, 3, 7, 3),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(8, 4, 8, 4),
                 IsHitTestVisible = false,
-                Child = new TextBlock
-                {
-                    Text = $"EXPORT AREA: {_exportAreaStats.PixelWidth}×{_exportAreaStats.PixelHeight} px • {gridTag} ({resW}×{resH} px/file)",
-                    Foreground = Brushes.White,
-                    FontSize = 10.5,
-                    FontWeight = FontWeights.Bold
-                }
+                Child = panelStack
             };
-            Canvas.SetLeft(badge, Math.Max(4, rx0 + 6));
-            Canvas.SetTop(badge, Math.Max(4, ry1 - 28));
+
+            badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double badgeW = badge.DesiredSize.Width > 0 ? badge.DesiredSize.Width : 160.0;
+            double badgeH = badge.DesiredSize.Height > 0 ? badge.DesiredSize.Height : 52.0;
+
+            double cx = (rx0 + rx1) * 0.5;
+
+            // Horizontally centered on the custom export zone square
+            double badgeX = Math.Clamp(cx - badgeW * 0.5, 4.0, Math.Max(4.0, w - badgeW - 4.0));
+
+            // Positioned directly below the outside bottom edge of the custom grid zone
+            double badgeY = ry1 + 8.0;
+
+            // If badge would extend past the bottom of the canvas, flip above the zone if space allows, else clamp
+            if (badgeY + badgeH > h - 4.0)
+            {
+                if (ry0 - badgeH - 8.0 >= 4.0)
+                {
+                    badgeY = ry0 - badgeH - 8.0;
+                }
+                else
+                {
+                    badgeY = Math.Max(4.0, h - badgeH - 4.0);
+                }
+            }
+
+            Canvas.SetLeft(badge, badgeX);
+            Canvas.SetTop(badge, badgeY);
             _mosaicOverlayCanvas.Children.Add(badge);
+
+            // Sub-Tile / Region Info Tags in the corner of each export region (Dynamically scaled by cell dimensions and zoom)
+            if (showSubGrid || isCustomArea)
+            {
+                var subCardBg = new SolidColorBrush(Color.FromArgb(215, 12, 18, 14));
+                var subCardBorder = new SolidColorBrush(Color.FromArgb(180, 232, 168, 73));
+                subCardBg.Freeze();
+                subCardBorder.Freeze();
+
+                for (int r = 0; r < outRows; r++)
+                {
+                    for (int c = 0; c < outCols; c++)
+                    {
+                        double cellX0 = rx0 + rw * (c / (double)outCols);
+                        double cellY0 = ry0 + rh * (r / (double)outRows);
+                        double cellW = rw / outCols;
+                        double cellH = rh / outRows;
+
+                        // Skip tag if cell is too small to display even a minimal indicator
+                        if (cellW < 26.0 || cellH < 16.0) continue;
+
+                        // Normalized scale factor between 30px (minimal) and 200px (full scale)
+                        double minDim = Math.Min(cellW, cellH);
+                        double t = Math.Clamp((minDim - 30.0) / 170.0, 0.0, 1.0);
+
+                        // Dynamically scale typography, padding, corner radius, and offsets
+                        double fontSize = 7.5 + (3.5 * t);          // 7.5pt -> 11.0pt
+                        double padH = 3.0 + (4.0 * t);              // 3.0px -> 7.0px
+                        double padV = 1.0 + (2.5 * t);              // 1.0px -> 3.5px
+                        double cornerOffset = 2.5 + (3.5 * t);      // 2.5px -> 6.0px
+                        double cornerRadius = 2.5 + (2.5 * t);      // 2.5px -> 5.0px
+                        double borderThickness = 0.7 + (0.5 * t);   // 0.7px -> 1.2px
+
+                        // Select text format according to available cell dimensions (Adaptive LOD)
+                        string pillText;
+                        if (showSubGrid)
+                        {
+                            if (cellW > 180.0 && cellH > 46.0)
+                            {
+                                double subSpanM = zoneMW / outCols;
+                                string subSpanStr = subSpanM >= 1000.0 ? $"{subSpanM / 1000.0:0.#}km" : $"{subSpanM:N0}m";
+                                pillText = $"x{c}_y{r} • {resW}×{resH} • {subSpanStr}";
+                            }
+                            else if (cellW > 105.0 && cellH > 32.0)
+                            {
+                                pillText = $"x{c}_y{r} • {resW}×{resH}";
+                            }
+                            else if (cellW > 45.0 && cellH > 20.0)
+                            {
+                                pillText = $"x{c}_y{r}";
+                            }
+                            else
+                            {
+                                pillText = $"x{c}y{r}";
+                            }
+                        }
+                        else
+                        {
+                            if (cellW > 220.0 && cellH > 50.0)
+                            {
+                                pillText = $"Single File • {resW}×{resH} px";
+                            }
+                            else if (cellW > 110.0 && cellH > 32.0)
+                            {
+                                pillText = $"1×1 • {resW}×{resH}";
+                            }
+                            else
+                            {
+                                pillText = "1×1";
+                            }
+                        }
+
+                        var textBlock = new TextBlock
+                        {
+                            Text = pillText,
+                            Foreground = (Brush)Resources["ThemeAccentPrimary"],
+                            FontSize = fontSize,
+                            FontWeight = FontWeights.SemiBold
+                        };
+
+                        var pill = new Border
+                        {
+                            Background = subCardBg,
+                            BorderBrush = subCardBorder,
+                            BorderThickness = new Thickness(borderThickness),
+                            CornerRadius = new CornerRadius(cornerRadius),
+                            Padding = new Thickness(padH, padV, padH, padV),
+                            IsHitTestVisible = false,
+                            Child = textBlock
+                        };
+
+                        // Verify that pill width fits comfortably within cell; downgrade to shorter text if cramped
+                        pill.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        if (pill.DesiredSize.Width > cellW - (cornerOffset * 2.0 + 4.0))
+                        {
+                            textBlock.Text = showSubGrid ? $"x{c}_y{r}" : "1×1";
+                            pill.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                            if (pill.DesiredSize.Width > cellW - (cornerOffset * 2.0))
+                            {
+                                textBlock.Text = showSubGrid ? $"x{c}y{r}" : "1";
+                            }
+                        }
+
+                        Canvas.SetLeft(pill, cellX0 + cornerOffset);
+                        Canvas.SetTop(pill, cellY0 + cornerOffset);
+                        _mosaicOverlayCanvas.Children.Add(pill);
+                    }
+                }
+            }
 
             // 4. Center Transform Control Gizmo (Reposition Handle for Custom Zone)
             if (isCustomArea)
@@ -2378,6 +2719,7 @@ public partial class MainWindow : Window
 
         HighlightSelectedResolutionButton();
         UpdateExpectedOutputFilesList();
+        UpdateDynamicScaleMatrix();
     }
 
     private void BottomTableTab_Changed(object sender, RoutedEventArgs e)
@@ -2385,15 +2727,446 @@ public partial class MainWindow : Window
         if (_isInitializing || DgTiles == null || DgExpectedOutputs == null) return;
 
         bool showLoaded = RbTabLoadedTiles?.IsChecked == true;
+        bool showOutputs = RbTabExpectedOutputs?.IsChecked == true;
+        bool showMatrix = RbTabScaleMatrix?.IsChecked == true;
+
         DgTiles.Visibility = showLoaded ? Visibility.Visible : Visibility.Collapsed;
-        DgExpectedOutputs.Visibility = showLoaded ? Visibility.Collapsed : Visibility.Visible;
+        DgExpectedOutputs.Visibility = showOutputs ? Visibility.Visible : Visibility.Collapsed;
+        if (PnlScaleMatrix != null)
+            PnlScaleMatrix.Visibility = showMatrix ? Visibility.Visible : Visibility.Collapsed;
 
         if (TxtBottomTableHint != null)
         {
-            TxtBottomTableHint.Text = showLoaded
-                ? "Use '✕' to remove a tile • Click a row to inspect"
-                : $"{_expectedOutputs.Count} expected output file(s) based on current Export Layout, Resolution & Format";
+            if (showLoaded)
+            {
+                TxtBottomTableHint.Text = "Use '✕' to remove a tile • Click a row to inspect";
+            }
+            else if (showOutputs)
+            {
+                TxtBottomTableHint.Text = $"{_expectedOutputs.Count} expected output file(s) based on current Export Layout, Resolution & Format";
+            }
+            else if (showMatrix)
+            {
+                TxtBottomTableHint.Text = "Live dynamic telemetry: Interconnected relationship between ground span (km), export resolution (px), ground scale (m/px) and source fidelity";
+            }
         }
+    }
+
+    private double _lastExportMppForMatrix = 1.0;
+
+    private void CnvHumanScaleReference_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RenderHumanScaleReference(_lastExportMppForMatrix);
+    }
+
+    private void UpdateDynamicScaleMatrix()
+    {
+        if (PnlScaleMatrix == null || TxtMatrixRegionSpanKm == null) return;
+
+        if (_tiles.Count == 0)
+        {
+            TxtMatrixRegionSpanKm.Text = "—";
+            TxtMatrixRegionSpanMeters.Text = "No tiles loaded";
+            TxtMatrixRegionType.Text = "Import DEM files to begin";
+            TxtMatrixTotalPixels.Text = "—";
+            TxtMatrixPerTileResolution.Text = "—";
+            TxtMatrixOutputLayout.Text = "—";
+            TxtMatrixGroundScaleMpp.Text = "—";
+            TxtMatrixSourceScaleMpp.Text = "Source DEM: —";
+            TxtMatrixEstFileSize.Text = "—";
+            TxtMatrixFormatDesc.Text = "—";
+            TxtMatrixBatchSummary.Text = "Total Files: 0";
+            TxtMatrixFidelityRatio.Text = "—";
+            TxtMatrixFidelityTitle.Text = "AWAITING DEM DATA";
+            TxtMatrixFidelityDesc.Text = "Import DEM GeoTIFF files or select a region of interest to inspect the live scale matrix.";
+            TxtMatrixElevationRange.Text = "—";
+            if (TxtMatrixHumanRatio != null) TxtMatrixHumanRatio.Text = "1 Step = —";
+            CnvHumanScaleReference?.Children.Clear();
+            if (BdrMatrixFidelityBadge != null)
+                BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeBorderCard"];
+            return;
+        }
+
+        var (rows, cols) = GetNewExportGridDimensionsFromUi();
+        var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+        int totalFiles = rows * cols;
+        long totalPxW = (long)fileW * cols;
+        long totalPxH = (long)fileH * rows;
+
+        double mpp = GetMetersPerPixelFromUi();
+        bool isCustom = IsCustomExportAreaActive;
+        double physW = _exportAreaStats.PixelWidth * mpp;
+        double physH = _exportAreaStats.PixelHeight * mpp;
+        double areaSqKm = (physW / 1000.0) * (physH / 1000.0);
+
+        TxtMatrixRegionSpanKm.Text = $"{FormatMetricDistance(physW)} × {FormatMetricDistance(physH)}";
+        TxtMatrixRegionSpanMeters.Text = $"{physW:N0} m × {physH:N0} m ({areaSqKm:0.##} km²)";
+        TxtMatrixRegionType.Text = isCustom ? "Custom Crop Selection" : "Full Global Mosaic";
+
+        TxtMatrixTotalPixels.Text = $"{totalPxW:N0} × {totalPxH:N0} px";
+        TxtMatrixPerTileResolution.Text = totalFiles == 1 ? "1 Tile @ Full Resolution" : $"{fileW} × {fileH} px per tile";
+        TxtMatrixOutputLayout.Text = totalFiles == 1 ? "1 Single Merged File (1×1)" : $"{rows} × {cols} Grid ({totalFiles} Tiles)";
+
+        double effectiveExportMpp = totalPxW > 0 ? (physW / totalPxW) : mpp;
+        TxtMatrixGroundScaleMpp.Text = $"{effectiveExportMpp:0.##} m/px";
+        TxtMatrixSourceScaleMpp.Text = $"Source DEM: {mpp:0.##} m/px";
+
+        int fmtIdx = CmbExportFileFormat?.SelectedIndex ?? 0;
+        bool exportAsTiff = fmtIdx == 1 || fmtIdx == 2;
+        bool tiffFloat32 = fmtIdx == 1;
+        string formatDesc = exportAsTiff
+            ? (tiffFloat32 ? "32-Bit Float GeoTIFF" : "16-Bit Norm GeoTIFF")
+            : "16-Bit Norm PNG";
+
+        long estBytesPerFile = exportAsTiff
+            ? ((long)fileW * fileH * (tiffFloat32 ? 4L : 2L) + 4096L)
+            : ((long)(fileW * fileH * 2.0 * 0.65) + 1024L);
+        long totalEstBytes = estBytesPerFile * totalFiles;
+
+        string totalEstSizeStr = totalEstBytes >= 1024 * 1024
+            ? $"~{totalEstBytes / (1024.0 * 1024.0):0.1} MB"
+            : $"~{Math.Max(1.0, totalEstBytes / 1024.0):0} KB";
+
+        TxtMatrixEstFileSize.Text = totalEstSizeStr;
+        TxtMatrixFormatDesc.Text = formatDesc;
+        TxtMatrixBatchSummary.Text = totalFiles == 1 ? "1 Output File" : $"Batch: {totalFiles} Files (~{estBytesPerFile / (1024.0 * 1024.0):0.1} MB/file)";
+
+        var (dispMin, dispMax) = GetEffectiveNormalizationRange();
+        float heightRange = Math.Max(0f, dispMax - dispMin);
+        TxtMatrixElevationRange.Text = $"[{dispMin:F1}m – {dispMax:F1}m]  Δ{heightRange:F1}m";
+
+        // Fidelity Ratio & Qualitative Indicator
+        double ratio = _exportAreaStats.PixelWidth > 0 ? (totalPxW / (double)_exportAreaStats.PixelWidth) : 1.0;
+        string simpRatio = FormatSimplifiedRatio(totalPxW, Math.Max(1, _exportAreaStats.PixelWidth));
+
+        if (BdrMatrixFidelityBadge != null)
+        {
+            if (Math.Abs(ratio - 1.0) < 0.05)
+            {
+                BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentExport"];
+                TxtMatrixFidelityRatio.Text = $"{simpRatio} (1:1 PARITY)";
+                TxtMatrixFidelityTitle.Text = "NATIVE PIXEL-TO-METER FIDELITY (EXACT 1:1)";
+                TxtMatrixFidelityDesc.Text = "Export resolution matches source DEM data sampling exactly. Optimal fidelity with zero blur or interpolation.";
+            }
+            else if (ratio < 0.95)
+            {
+                BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentPrimary"];
+                TxtMatrixFidelityRatio.Text = $"{ratio:0.##}× (DOWNSAMPLED)";
+                TxtMatrixFidelityTitle.Text = "DOWNSAMPLED HIGH-DENSITY TERRAIN";
+                TxtMatrixFidelityDesc.Text = "Heightmap pixels consolidate multiple source DEM pixels. Produces clean, crisp rendering and compact storage.";
+            }
+            else if (ratio <= 2.0)
+            {
+                BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentWarning"];
+                TxtMatrixFidelityRatio.Text = $"{ratio:0.##}× (UPSAMPLED)";
+                TxtMatrixFidelityTitle.Text = "INTERPOLATED UPSAMPLED RESOLUTION";
+                TxtMatrixFidelityDesc.Text = "Output resolution is finer than source DEM data. Sub-pixel bilinear interpolation smooths high frequencies.";
+            }
+            else
+            {
+                BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentDanger"];
+                TxtMatrixFidelityRatio.Text = $"{ratio:0.##}× (OVER-SAMPLED)";
+                TxtMatrixFidelityTitle.Text = "HIGH OVERSAMPLING WARNING (>2× SOURCE)";
+                TxtMatrixFidelityDesc.Text = "Output resolution heavily exceeds source topographic detail. Results in bloated file sizes without adding new real elevation features.";
+            }
+        }
+
+        // Pillar 5: Dynamic Human Scale Reference vs Pixel Step Stairs
+        _lastExportMppForMatrix = effectiveExportMpp;
+        RenderHumanScaleReference(effectiveExportMpp);
+    }
+
+    private void RenderHumanScaleReference(double effectiveExportMpp)
+    {
+        if (CnvHumanScaleReference == null) return;
+        CnvHumanScaleReference.Children.Clear();
+
+        double w = CnvHumanScaleReference.ActualWidth;
+        double h = CnvHumanScaleReference.ActualHeight;
+        if (w < 20.0 || h < 20.0) return;
+
+        double stepM = Math.Max(0.01, effectiveExportMpp);
+        const double humanM = 1.75;
+        double ratio = stepM / humanM;
+
+        // Telemetry Ratio Header
+        if (TxtMatrixHumanRatio != null)
+        {
+            string stepLabel = stepM >= 1000.0 ? $"{stepM / 1000.0:0.##}km" :
+                               stepM >= 10.0 ? $"{stepM:0.#}m" :
+                               $"{stepM:0.##}m";
+
+            if (ratio < 0.2)
+                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (Ankle)";
+            else if (ratio < 0.5)
+                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (Knee)";
+            else if (ratio < 0.85)
+                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (Waist)";
+            else if (ratio <= 1.15)
+                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (1:1 Human)";
+            else if (ratio < 3.0)
+                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} ({ratio:0.#}× Tall)";
+            else if (ratio < 10.0)
+                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} ({ratio:0.#}× Cliff)";
+            else
+                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} ({ratio:0.#}× Monolith)";
+        }
+
+        double groundY = h - 6.0;
+        double targetHumanPx;
+        double targetStepPx;
+
+        if (ratio <= 1.0)
+        {
+            // Human is larger than or equal to 1 step
+            targetHumanPx = Math.Clamp(h * 0.70, 24.0, 42.0);
+            double ppm = targetHumanPx / humanM;
+            targetStepPx = Math.Max(2.5, stepM * ppm);
+        }
+        else if (ratio <= 6.0)
+        {
+            // Step is 1x to 6x human
+            targetStepPx = Math.Clamp(h * 0.76, 26.0, 45.0);
+            double ppm = targetStepPx / stepM;
+            targetHumanPx = Math.Max(12.0, humanM * ppm);
+        }
+        else
+        {
+            // Step is huge (cliff / mountain pixel)
+            targetHumanPx = 12.0; // Keep human recognizable
+            targetStepPx = h - 10.0;
+        }
+
+        var accentBrush = (Brush)Resources["ThemeAccentExport"] ?? Brushes.Goldenrod;
+        var primaryBrush = (Brush)Resources["ThemeAccentPrimary"] ?? Brushes.Cyan;
+        var textMuted = (Brush)Resources["ThemeTextMuted"] ?? Brushes.Gray;
+        var stepFill = new SolidColorBrush(Color.FromArgb(50, 232, 168, 73));
+        stepFill.Freeze();
+
+        // Ground baseline
+        var groundLine = new Line
+        {
+            X1 = 4.0,
+            Y1 = groundY,
+            X2 = w - 4.0,
+            Y2 = groundY,
+            Stroke = textMuted,
+            StrokeThickness = 1.0,
+            StrokeDashArray = new DoubleCollection { 3, 2 },
+            Opacity = 0.6
+        };
+        CnvHumanScaleReference.Children.Add(groundLine);
+
+        // Anchor positions: place human on left, stairs in center/right
+        double baseX = Math.Clamp(w * 0.22, 28.0, 50.0);
+        double stepStartX = baseX + 0.22 * targetHumanPx;
+
+        // Draw Stairs (Pixel Steps)
+        if (ratio <= 0.45)
+        {
+            // Multiple small steps (like a real staircase)
+            int numSteps = Math.Clamp((int)Math.Round(1.75 / stepM), 2, 5);
+            double curX = stepStartX;
+            double curY = groundY;
+
+            var stairGeom = new StreamGeometry();
+            using (var ctx = stairGeom.Open())
+            {
+                ctx.BeginFigure(new Point(curX, groundY), true, true);
+                for (int i = 0; i < numSteps; i++)
+                {
+                    curY -= targetStepPx;
+                    ctx.LineTo(new Point(curX, curY), true, false);
+                    curX += targetStepPx;
+                    ctx.LineTo(new Point(curX, curY), true, false);
+                }
+                ctx.LineTo(new Point(curX, groundY), true, false);
+            }
+            stairGeom.Freeze();
+
+            var stairPath = new System.Windows.Shapes.Path
+            {
+                Data = stairGeom,
+                Fill = stepFill,
+                Stroke = accentBrush,
+                StrokeThickness = 1.2
+            };
+            CnvHumanScaleReference.Children.Add(stairPath);
+
+            // Step dimension label
+            var txtStep = new TextBlock
+            {
+                Text = $"{stepM:0.##}m / px",
+                FontSize = 7.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = accentBrush
+            };
+            Canvas.SetLeft(txtStep, Math.Min(w - 55.0, stepStartX + 4.0));
+            Canvas.SetTop(txtStep, Math.Max(2.0, curY - 12.0));
+            CnvHumanScaleReference.Children.Add(txtStep);
+        }
+        else
+        {
+            // 1 or 2 large steps / cliff
+            double stepTopY = Math.Max(4.0, groundY - targetStepPx);
+            double stepEndX = Math.Min(w - 8.0, stepStartX + Math.Max(targetStepPx, 35.0));
+
+            var stairGeom = new StreamGeometry();
+            using (var ctx = stairGeom.Open())
+            {
+                ctx.BeginFigure(new Point(stepStartX, groundY), true, true);
+                ctx.LineTo(new Point(stepStartX, stepTopY), true, false);
+                ctx.LineTo(new Point(stepEndX, stepTopY), true, false);
+                ctx.LineTo(new Point(stepEndX, groundY), true, false);
+            }
+            stairGeom.Freeze();
+
+            var stairPath = new System.Windows.Shapes.Path
+            {
+                Data = stairGeom,
+                Fill = stepFill,
+                Stroke = accentBrush,
+                StrokeThickness = 1.3
+            };
+            CnvHumanScaleReference.Children.Add(stairPath);
+
+            // Pixel Step Dimension Pill
+            string stepDimText = ratio > 5.0 ? $"1 PX = {stepM:0.#}m (CLIFF)" : $"1 PX = {stepM:0.##}m";
+            var txtStep = new TextBlock
+            {
+                Text = stepDimText,
+                FontSize = 8.0,
+                FontWeight = FontWeights.Bold,
+                Foreground = accentBrush
+            };
+            Canvas.SetLeft(txtStep, Math.Min(w - 75.0, stepStartX + 5.0));
+            Canvas.SetTop(txtStep, Math.Max(2.0, stepTopY - 12.0));
+            CnvHumanScaleReference.Children.Add(txtStep);
+
+            // Hatching lines for huge cliff steps
+            if (ratio > 5.0)
+            {
+                for (double hy = stepTopY + 8.0; hy < groundY - 4.0; hy += 7.0)
+                {
+                    var hatch = new Line
+                    {
+                        X1 = stepStartX + 3.0,
+                        Y1 = hy,
+                        X2 = stepStartX + 12.0,
+                        Y2 = hy - 4.0,
+                        Stroke = accentBrush,
+                        StrokeThickness = 0.8,
+                        Opacity = 0.4
+                    };
+                    CnvHumanScaleReference.Children.Add(hatch);
+                }
+            }
+        }
+
+        // Draw Stepping Human Silhouette
+        DrawSteppingHumanFigure(baseX, groundY, targetHumanPx, stepStartX, groundY - targetStepPx);
+
+        // Height bracket for the human
+        double bracketX = Math.Max(2.0, baseX - 10.0);
+        double humanTopY = groundY - targetHumanPx;
+        var bracketLine = new Line
+        {
+            X1 = bracketX,
+            Y1 = humanTopY,
+            X2 = bracketX,
+            Y2 = groundY,
+            Stroke = primaryBrush,
+            StrokeThickness = 0.8,
+            Opacity = 0.7
+        };
+        var tickTop = new Line { X1 = bracketX - 2.0, Y1 = humanTopY, X2 = bracketX + 2.0, Y2 = humanTopY, Stroke = primaryBrush, StrokeThickness = 0.8 };
+        var tickBottom = new Line { X1 = bracketX - 2.0, Y1 = groundY, X2 = bracketX + 2.0, Y2 = groundY, Stroke = primaryBrush, StrokeThickness = 0.8 };
+        CnvHumanScaleReference.Children.Add(bracketLine);
+        CnvHumanScaleReference.Children.Add(tickTop);
+        CnvHumanScaleReference.Children.Add(tickBottom);
+
+        var txtHuman = new TextBlock
+        {
+            Text = "1.75m",
+            FontSize = 7.0,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = primaryBrush,
+            Opacity = 0.9
+        };
+        Canvas.SetLeft(txtHuman, Math.Max(1.0, bracketX - 20.0));
+        Canvas.SetTop(txtHuman, groundY - (targetHumanPx * 0.5) - 5.0);
+        CnvHumanScaleReference.Children.Add(txtHuman);
+    }
+
+    private void DrawSteppingHumanFigure(double baseX, double baseY, double h, double stepX, double stepY)
+    {
+        var figureBrush = (Brush)Resources["ThemeTextPrimary"] ?? Brushes.White;
+        double strokeW = Math.Max(1.3, h * 0.075);
+
+        // Head
+        double headR = Math.Max(1.5, h * 0.08);
+        double headCx = baseX + 0.16 * h;
+        double headCy = baseY - 0.90 * h;
+
+        var head = new Ellipse
+        {
+            Width = headR * 2.0,
+            Height = headR * 2.0,
+            Fill = figureBrush
+        };
+        Canvas.SetLeft(head, headCx - headR);
+        Canvas.SetTop(head, headCy - headR);
+        CnvHumanScaleReference.Children.Add(head);
+
+        // Torso (leaning slightly into the step)
+        var shoulders = new Point(baseX + 0.14 * h, baseY - 0.77 * h);
+        var hips = new Point(baseX + 0.08 * h, baseY - 0.48 * h);
+        AddFigureLine(shoulders, hips, strokeW, figureBrush);
+
+        // Back leg (supporting on ground)
+        var backKnee = new Point(baseX + 0.03 * h, baseY - 0.25 * h);
+        var backAnkle = new Point(baseX + 0.00 * h, baseY - 0.03 * h);
+        AddFigureLine(hips, backKnee, strokeW, figureBrush);
+        AddFigureLine(backKnee, backAnkle, strokeW, figureBrush);
+        AddFigureLine(new Point(baseX - 0.04 * h, baseY), new Point(baseX + 0.04 * h, baseY), strokeW * 0.9, figureBrush);
+
+        // Front leg (stepping up onto the step tread)
+        double targetStepRise = baseY - stepY;
+        double stepContactY = (targetStepRise > 0.0 && targetStepRise < h * 0.6) ? stepY : (baseY - Math.Min(h * 0.45, Math.Max(4.0, targetStepRise)));
+        double frontFootX = Math.Max(baseX + 0.22 * h, stepX + 3.0);
+        var frontKnee = new Point(baseX + 0.20 * h, Math.Min(baseY - 0.40 * h, stepContactY - 0.06 * h));
+        var frontAnkle = new Point(frontFootX, stepContactY - 0.02 * h);
+
+        AddFigureLine(hips, frontKnee, strokeW, figureBrush);
+        AddFigureLine(frontKnee, frontAnkle, strokeW, figureBrush);
+        AddFigureLine(new Point(frontFootX - 0.02 * h, stepContactY), new Point(frontFootX + 0.06 * h, stepContactY), strokeW * 0.9, figureBrush);
+
+        // Arms (Dynamic climbing posture)
+        var leadElbow = new Point(baseX + 0.26 * h, baseY - 0.62 * h);
+        var leadHand = new Point(baseX + 0.33 * h, baseY - 0.54 * h);
+        AddFigureLine(shoulders, leadElbow, strokeW * 0.85, figureBrush);
+        AddFigureLine(leadElbow, leadHand, strokeW * 0.85, figureBrush);
+
+        var trailElbow = new Point(baseX - 0.01 * h, baseY - 0.64 * h);
+        var trailHand = new Point(baseX - 0.06 * h, baseY - 0.52 * h);
+        AddFigureLine(shoulders, trailElbow, strokeW * 0.85, figureBrush);
+        AddFigureLine(trailElbow, trailHand, strokeW * 0.85, figureBrush);
+    }
+
+    private void AddFigureLine(Point p1, Point p2, double thickness, Brush brush)
+    {
+        var line = new Line
+        {
+            X1 = p1.X,
+            Y1 = p1.Y,
+            X2 = p2.X,
+            Y2 = p2.Y,
+            Stroke = brush,
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round
+        };
+        CnvHumanScaleReference.Children.Add(line);
     }
 
     private void UpdateExpectedOutputFilesList()
@@ -2457,6 +3230,7 @@ public partial class MainWindow : Window
         double areaX1 = _exportNormX1;
         double areaY1 = _exportNormY1;
 
+        int fileIndex = 1;
         for (int r = 0; r < outRows; r++)
         {
             for (int c = 0; c < outCols; c++)
@@ -2500,6 +3274,7 @@ public partial class MainWindow : Window
                 float subRange = Math.Max(0f, subMax - subMin);
 
                 _expectedOutputs.Add(new ExpectedOutputFileItem(
+                    Index: fileIndex++,
                     OutputFileName: outFileName,
                     GridSlotLabel: totalFiles == 1 ? "Single (1×1)" : $"Col {c}, Row {r} (x{c}_y{r})",
                     FormatDescription: formatDesc,

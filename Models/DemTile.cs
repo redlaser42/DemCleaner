@@ -55,9 +55,16 @@ public class DemTile : INotifyPropertyChanged
     private float _maxElevation;
     private float _meanElevation;
     private string _status = "Loaded";
+    private int _index;
 
     public static IReadOnlyList<TileFillModeOverride> AvailableFillOverrides { get; } =
         Enum.GetValues<TileFillModeOverride>();
+
+    public int Index
+    {
+        get => _index;
+        set { _index = value; OnPropertyChanged(); }
+    }
 
     public string FilePath { get; init; } = string.Empty;
     public string FileName => Path.GetFileName(FilePath);
@@ -227,6 +234,7 @@ public class DemTile : INotifyPropertyChanged
 }
 
 public sealed record ExpectedOutputFileItem(
+    int Index,
     string OutputFileName,
     string GridSlotLabel,
     string FormatDescription,
