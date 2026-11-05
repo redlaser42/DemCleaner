@@ -71,8 +71,14 @@ Crop any square area with real-time ground distance, effective meters-per-pixel 
 - **Runtime**: [.NET 8.0 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
 - **GPU**: DirectX 9+ compatible GPU for 3D preview
 
+### Downloading Elevation Data (USGS DEMs)
+Free real-world elevation GeoTIFF datasets can be downloaded from:
+- **[USGS The National Map Downloader](https://apps.nationalmap.gov/downloader/)**: The primary tool for acquiring USGS 3DEP elevation data (1-meter LiDAR, 1/3 arc-second ~10m, and 1 arc-second ~30m DEM GeoTIFFs).
+- **[USGS EarthExplorer](https://earthexplorer.usgs.gov/)**: Search and download global and domestic elevation coverage (SRTM, ASTER, and 3DEP).
+- **[USGS 3D Elevation Program (3DEP)](https://www.usgs.gov/3d-elevation-program)**: Program overview and data access guides.
+
 ### Installation
-1. Download the latest release from the [Releases](https://github.com/sippstudio/dem-cleaner/releases) page (`DemCleaner-v1.0.0-win-x64.zip`).
+1. Download the latest release from the [Releases](https://github.com/sippstudio/dem-cleaner/releases) page.
 2. Extract the archive to any folder.
 3. Run `DemCleaner.exe`.
 
