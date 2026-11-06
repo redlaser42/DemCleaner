@@ -36,8 +36,10 @@
 - **Interactive 2D & 3D Viewports**: Inspect your terrain in a full 2D mosaic view or explore a hardware-accelerated 3D preview with adjustable sun angles, wireframe overlays, and hypsometric color ramps.
 - **Custom Crop & Sub-Tile Splitting**: Draw a custom region box to export only the area you need. Split the output into a single merged heightmap, the original tile grid, or custom subdivided tiles.
 - **Engine-Ready Presets**: Export directly to standard landscape dimensions for **Unreal Engine** (8129, 4033, 2017) or **Unity** (4097, 2049, 1025) as 16-bit grayscale PNG or 32-bit float GeoTIFF.
-- **Helpful UI**: Lots of helfpul statistics and graphs to help users of heighmap worfkows, like the human scale ground reference graph:   <img src="scale-graph.gif" alt="Scale Graph Gif" width="90%" />
-
+- **Helpful UI**: Lots of helfpul statistics and graphs to help users of heighmap worfkows, like the human scale ground reference graph: 
+<p align="center">
+  <img src="scale-graph.gif" alt="Scale Graph Gif" width="90%" />
+</p>
 
 
 ---
