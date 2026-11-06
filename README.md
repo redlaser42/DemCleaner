@@ -66,7 +66,7 @@ Crop any square area with real-time ground distance, effective meters-per-pixel 
 Lots of helfpul statistics and graphs to help users of heighmap worfkows, like the human scale ground reference graph.
 
 <p align="center">
-  <img src="scale-graph.gif" alt="Scale Graph Gif" width="90%" />
+  <img src="images/scale-graph.gif" alt="Scale Graph Gif" width="90%" />
 </p>
 ---
 
