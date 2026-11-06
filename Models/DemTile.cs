@@ -36,7 +36,7 @@ public class DemProcessingOptions
     public bool UseCustomThreshold { get; set; } = true;
     public NoDataComparison CustomComparison { get; set; } = NoDataComparison.LessThanOrEqual;
     public float CustomNoDataValue { get; set; } = -9999f;
-    public bool FillUsingGlobalStats { get; set; } = false; // False = per-tile min/max/mean, True = global dataset min/max/mean
+    public bool FillUsingGlobalStats { get; set; } = true; // False = per-tile min/max/mean, True = global dataset min/max/mean
     public int InterpolationIterations { get; set; } = 10;
     public int SeamSmoothingSteps { get; set; } = 0;
 }

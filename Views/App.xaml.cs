@@ -35,6 +35,17 @@ public partial class App : Application
             if (defaultOptions.FillMethod != FillMethod.Minimum)
                 throw new Exception($"Expected default FillMethod.Minimum, got {defaultOptions.FillMethod}");
 
+            // 2. Verify MainWindow XAML/BAML and StartupUri resolve and instantiate cleanly
+            if (Current?.StartupUri != null)
+            {
+                var loadedFromStartupUri = LoadComponent(Current.StartupUri);
+                if (loadedFromStartupUri is not DemCleaner.MainWindow)
+                    throw new Exception($"StartupUri '{Current.StartupUri}' did not resolve to MainWindow.");
+            }
+            var window = new DemCleaner.MainWindow();
+            if (window == null)
+                throw new Exception("MainWindow instantiation returned null.");
+
             File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "selftest_result.txt"),
                 $"SELF-TEST PASSED: Default={defaultOptions.FillMethod}, Themes={ThemeManager.Themes.Count}.");
         }

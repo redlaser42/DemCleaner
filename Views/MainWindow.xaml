@@ -398,7 +398,7 @@
             <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
             <Setter Property="Foreground" Value="{DynamicResource ThemeTextPrimary}"/>
             <Setter Property="FontSize" Value="11.5"/>
-            <Setter Property="Padding" Value="8,3,28,3"/>
+            <Setter Property="Padding" Value="7,1.5,26,1.5"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -630,10 +630,15 @@
                 </StackPanel>
 
                 <!-- Right Side of Left-Aligned Header: Settings Cog Wheel Button -->
-                <Button x:Name="BtnToggleSettings" Grid.Column="1" Content="⚙" Style="{StaticResource SecondaryButton}"
-                        FontSize="18" FontWeight="Bold" Width="34" Padding="0"
+                <Button x:Name="BtnToggleSettings" Grid.Column="1" Style="{StaticResource SecondaryButton}"
+                        Width="34" Height="28" Padding="0"
                         Click="BtnToggleSettings_Click"
-                        ToolTip="Open Settings (Color Theme &amp; Map Provider)"/>
+                        ToolTip="Open Settings (Color Theme &amp; Map Provider)">
+                    <Viewbox Width="15" Height="15">
+                        <Path Fill="{DynamicResource ThemeTextPrimary}"
+                              Data="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" />
+                    </Viewbox>
+                </Button>
             </Grid>
         </Border>
 
@@ -699,7 +704,7 @@
                     <!-- 1. Import DEM Files (Consolidated Import TIFF Files / Folder Action + Clear All) -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="1. IMPORT DEM FILES" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,6"/>
+                            <TextBlock Text="1. IMPORT DEM FILES" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,0,0,6"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="2.1*"/>
@@ -712,12 +717,12 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 2. NoData / Empty Pixel Detection -->
+                    <!-- 2. NoData / Void Pixel Detection -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="2. EMPTY / NO DATA DETECTION" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,6"/>
+                            <TextBlock Text="2. VOID &amp; NODATA DETECTION" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,0,0,6"/>
                             <CheckBox x:Name="ChkUseGdalNoData" Content="Auto-detect GDAL_NODATA tag &amp; NaN/Inf" IsChecked="True" Checked="DetectionSetting_Changed" Unchecked="DetectionSetting_Changed"/>
-                            <CheckBox x:Name="ChkUseCustomThreshold" Content="Treat custom elevation threshold as empty:" IsChecked="True" Checked="DetectionSetting_Changed" Unchecked="DetectionSetting_Changed"/>
+                            <CheckBox x:Name="ChkUseCustomThreshold" Content="Treat custom elevation threshold as void / NoData:" IsChecked="True" Checked="DetectionSetting_Changed" Unchecked="DetectionSetting_Changed"/>
 
                             <Grid Margin="20,5,0,4">
                                 <Grid.ColumnDefinitions>
@@ -736,15 +741,15 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 3. Empty Area Fill Strategy (Default = Minimum Valid Elevation, Optional Per-Tile Override) -->
+                    <!-- 3. Void Fill Strategy (Default = Minimum Elevation, Optional Per-Tile Override) -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="3. EMPTY DATA FILL &amp; SEAM SMOOTHING" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,6"/>
+                            <TextBlock Text="3. VOID FILLING &amp; SEAM SMOOTHING" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,0,0,6"/>
 
-                            <RadioButton x:Name="RbFillMin" GroupName="FillMode" Content="Minimum Valid Elevation" IsChecked="True" Checked="FillSetting_Changed"/>
-                            <RadioButton x:Name="RbFillMax" GroupName="FillMode" Content="Maximum Valid Elevation" Checked="FillSetting_Changed"/>
-                            <RadioButton x:Name="RbFillMean" GroupName="FillMode" Content="Average Valid Elevation" Checked="FillSetting_Changed"/>
-                            <RadioButton x:Name="RbFillInterpolated" GroupName="FillMode" Content="Interpolated" Checked="FillSetting_Changed"/>
+                            <RadioButton x:Name="RbFillMin" GroupName="FillMode" Content="Minimum Elevation" IsChecked="True" Checked="FillSetting_Changed"/>
+                            <RadioButton x:Name="RbFillMax" GroupName="FillMode" Content="Maximum Elevation" Checked="FillSetting_Changed"/>
+                            <RadioButton x:Name="RbFillMean" GroupName="FillMode" Content="Average (Mean) Elevation" Checked="FillSetting_Changed"/>
+                            <RadioButton x:Name="RbFillInterpolated" GroupName="FillMode" Content="Interpolated (Laplacian Diffusion)" Checked="FillSetting_Changed"/>
 
                             <!-- Interpolated Sub-Options: Smoothing Passes (Default 10) & Warning Note (Only visible when Interpolated is selected) -->
                             <Border x:Name="BdrInterpolatedNote" Visibility="Collapsed" Background="{DynamicResource ThemeBgWell}" BorderBrush="{DynamicResource ThemeBorderControl}" BorderThickness="1" CornerRadius="5" Padding="9,7" Margin="20,3,0,4">
@@ -753,11 +758,11 @@
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="34"/>
+                                            <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="Smoothing Passes:" Foreground="{DynamicResource ThemeTextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                         <Slider x:Name="SldIterations" Grid.Column="1" Minimum="1" Maximum="500" Value="10" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SldIterations_ValueChanged" VerticalAlignment="Center"/>
-                                        <TextBlock Grid.Column="2" Text="{Binding ElementName=SldIterations, Path=Value, StringFormat={}{0:0}}" Foreground="{DynamicResource ThemeTextPrimary}" FontWeight="SemiBold" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtIterationsLabel" Grid.Column="2" Text="{Binding ElementName=SldIterations, Path=Value, StringFormat={}{0:0}}" Foreground="{DynamicResource ThemeTextPrimary}" FontWeight="SemiBold" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="6,0,0,0"/>
                                     </Grid>
                                     <TextBlock Text="Note: Interpolation may take a very long time at high resolutions and passes."
                                                    FontSize="10.5" Foreground="{DynamicResource ThemeAccentWarning}" TextWrapping="Wrap"/>
@@ -797,22 +802,22 @@
                                 </StackPanel>
                             </Border>
 
-                            <Button x:Name="BtnProcessAll" Content="Re-Calculate &amp; Fill All Tiles" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0" Padding="10,7" Click="BtnProcessAll_Click"/>
+                            <Button x:Name="BtnProcessAll" Content="Re-Calculate &amp; Fill All Tiles" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0" Padding="10,7" Click="BtnProcessAll_Click" Background="{DynamicResource ThemeBorderCard}"/>
                         </StackPanel>
                     </Border>
 
-                    <!-- 4. Export Layout, Resolution and Format (Renumbered from 5) -->
+                    <!-- 4. Export Tiling, Resolution and Format -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="4. EXPORT LAYOUT, RESOLUTION AND FORMAT" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,6"/>
+                            <TextBlock Text="4. EXPORT TILING, RESOLUTION &amp; FORMAT" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,0,0,6"/>
 
-                            <!-- Output Layout: Source Grid Size (Default), Single Merged Image (Below), Custom Grid Size -->
+                            <!-- Output Tiling: Source Tile Grid (Default), Single Merged Image (Below), Custom Subdivided Tiles -->
                             <Border Background="{DynamicResource ThemeBgWell}" CornerRadius="6" Padding="9,7" Margin="0,0,0,9">
                                 <StackPanel>
-                                    <TextBlock Text="Output Layout" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,0,0,4"/>
-                                    <RadioButton x:Name="RbExportSourceGrid" GroupName="NewExportLayout" Content="Source Grid Size (Matches loaded tiles)" IsChecked="True" Checked="NewExportLayout_Changed"/>
+                                    <TextBlock Text="Output Tiling" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,0,0,4"/>
+                                    <RadioButton x:Name="RbExportSourceGrid" GroupName="NewExportLayout" Content="Source Tile Grid (Matches loaded files)" IsChecked="True" Checked="NewExportLayout_Changed"/>
                                     <RadioButton x:Name="RbExportSingleImage" GroupName="NewExportLayout" Content="Single Merged Image (1 &#215; 1 file)" Checked="NewExportLayout_Changed"/>
-                                    <RadioButton x:Name="RbExportCustomGrid" GroupName="NewExportLayout" Content="Custom Grid Size" Checked="NewExportLayout_Changed"/>
+                                    <RadioButton x:Name="RbExportCustomGrid" GroupName="NewExportLayout" Content="Custom Subdivided Tiles" Checked="NewExportLayout_Changed"/>
 
                                     <Grid x:Name="GrdNewExportCustomGrid" Margin="20,5,0,2" Visibility="Collapsed">
                                         <Grid.ColumnDefinitions>
@@ -820,7 +825,7 @@
                                             <ColumnDefinition Width="64"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="Grid Size:" VerticalAlignment="Center" Foreground="{DynamicResource ThemeTextSecondary}" FontSize="11.5" Margin="0,0,8,0"/>
+                                        <TextBlock Grid.Column="0" Text="Subdivisions (N &#215; N):" VerticalAlignment="Center" Foreground="{DynamicResource ThemeTextSecondary}" FontSize="11.5" Margin="0,0,8,0"/>
                                         <TextBox x:Name="TxtNewExportGridSize" Grid.Column="1" Text="2" LostFocus="NewExportDimensions_Changed" KeyDown="NewExportDimensions_KeyDown" ToolTip="Splits the export area into an N × N grid of tiles"/>
                                     </Grid>
                                 </StackPanel>
@@ -888,7 +893,30 @@
                                     </Grid>
 
                                     <CheckBox x:Name="ChkLockExportAspectRatio" Content="Lock aspect ratio to Export Area tile shape" IsChecked="False" Checked="ChkLockExportAspectRatio_Changed" Unchecked="ChkLockExportAspectRatio_Changed" ToolTip="When enabled, automatically adjusts the output Height (px) whenever Width (px) or Output Grid changes so each exported file preserves the exact width-to-height aspect ratio of its source tile region in the Export Area."/>
-                                    <TextBlock x:Name="TxtNewExportResolutionSummary" Text="Output: 1 Single File &#x2022; 1024 &#215; 1024 px &#x2022; Ratio: 1.00&#215;" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentExport}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="TxtNewExportResolutionSummary" Text="Output: 1 Single File • 1024 × 1024 px • Ratio: 1.00×" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentExport}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+
+                                    <!-- 3D Preview Mesh Synchronization Status -->
+                                    <Border x:Name="Bdr3DPreviewSyncStatus" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="4" Padding="7,4" Margin="0,5,0,0" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                        <Border.ToolTip>
+                                            <ToolTip MaxWidth="360" Padding="10,8">
+                                                <StackPanel>
+                                                    <TextBlock x:Name="Txt3DPreviewLinkTooltipTitle" Text="3D PREVIEW vs. EXPORT TARGET" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                    <TextBlock x:Name="Txt3DPreviewLinkTooltipDesc" Text="Compares the active 3D Viewport rendering tier against your configured Export Resolution." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </ToolTip>
+                                        </Border.ToolTip>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock x:Name="Txt3DPreviewLinkStatus" Text="3D Preview: Linked to Export (1024 × 1024 px)" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentExport}" TextWrapping="Wrap"/>
+                                                <TextBlock x:Name="Txt3DPreviewLinkDetail" Text="3D preview automatically updates when export size changes" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <Button x:Name="BtnLink3DToExport" Grid.Column="1" Content="Link 3D" Style="{StaticResource SecondaryButton}" Padding="6,2" FontSize="9.5" VerticalAlignment="Center" Margin="6,0,0,0" Visibility="Collapsed" Click="BtnLink3DToExport_Click" ToolTip="Synchronize 3D visualizer resolution with this export setting"/>
+                                        </Grid>
+                                    </Border>
                                 </StackPanel>
                             </Border>
 
@@ -906,10 +934,10 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 6. Export Folder (Bottom of Export Option Panels) -->
+                    <!-- 5. Export Folder (Bottom of Export Option Panels) -->
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
-                            <TextBlock Text="5. EXPORT FOLDER" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,6"/>
+                            <TextBlock Text="5. EXPORT FOLDER" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,0,0,6"/>
 
                             <!-- Designated Export Folder Selection & Open Folder Buttons -->
                             <TextBlock Text="Designated Export Folder:" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,0,0,4"/>
@@ -955,8 +983,8 @@
             <Grid Grid.Column="2" Margin="0,-46,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="215"/>
+                    <RowDefinition/>
+                    <RowDefinition Height="280"/>
                 </Grid.RowDefinitions>
 
                 <!-- Viewport Mode Page Tabs & Quick Canvas Actions Bar -->
@@ -969,7 +997,7 @@
 
                     <!-- Left: Viewport Mode Page Tabs -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Bottom">
-                        <RadioButton x:Name="RbViewGrid" GroupName="PreviewTab" Content="Grid Layout" Style="{StaticResource PageTabButton}" IsChecked="True" Checked="PreviewMode_Changed"/>
+                        <RadioButton x:Name="RbViewGrid" GroupName="PreviewTab" Content="2D Mosaic View" Style="{StaticResource PageTabButton}" IsChecked="True" Checked="PreviewMode_Changed"/>
                         <RadioButton x:Name="RbViewInspector" GroupName="PreviewTab" Content="Individual Tile Inspector" Style="{StaticResource PageTabButton}" Checked="PreviewMode_Changed"/>
                         <RadioButton x:Name="RbView3D" GroupName="PreviewTab" Content="3D Visualizer" Style="{StaticResource PageTabButton}" Checked="PreviewMode_Changed"/>
                     </StackPanel>
@@ -979,7 +1007,7 @@
                         <!-- Selected Tile Per-Tile Fill Method Selector (Visible when Per-Tile Override is enabled) -->
                         <StackPanel x:Name="PnlSelectedTileOverride" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center" Margin="0,0,10,0">
                             <TextBlock Text="Selected Fill:" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                            <ComboBox x:Name="CmbSelectedTileFillOverride" Width="112" Height="23" SelectionChanged="CmbSelectedTileFillOverride_SelectionChanged" VerticalContentAlignment="Center">
+                            <ComboBox x:Name="CmbSelectedTileFillOverride" Width="142" Height="25" SelectionChanged="CmbSelectedTileFillOverride_SelectionChanged" VerticalContentAlignment="Center">
                                 <ComboBoxItem Content="Use Global Default"/>
                                 <ComboBoxItem Content="Minimum"/>
                                 <ComboBoxItem Content="Maximum"/>
@@ -988,7 +1016,12 @@
                             </ComboBox>
                         </StackPanel>
 
-                        <CheckBox x:Name="ChkHighlightVoidsInRed" Content="Highlight Voids" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentDanger}" IsChecked="False" Checked="PreviewLayer_Changed" Unchecked="PreviewLayer_Changed" ToolTip="When checked, displays raw input elevation data with empty/NoData void pixels highlighted in red" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <CheckBox x:Name="ChkHighlightVoidsInRed" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextPrimary}" IsChecked="False" Checked="PreviewLayer_Changed" Unchecked="PreviewLayer_Changed" ToolTip="When checked, displays raw input elevation data with empty/NoData void pixels highlighted in red" VerticalAlignment="Center" Margin="0,0,10,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Width="7.5" Height="7.5" CornerRadius="4" Background="#E05252" BorderBrush="#FF8585" BorderThickness="1" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Highlight Voids" Foreground="{DynamicResource ThemeTextPrimary}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </CheckBox>
                         <Button x:Name="BtnCenterExportAreaToolbar" Content="◎ Center Res" Style="{StaticResource SecondaryButton}" Padding="8,3" FontSize="10.5" Margin="0,0,5,0" Click="BtnCenterExportArea_Click" IsEnabled="False" ToolTip="Create a custom export region at the center of the grid sized to the selected export resolution in source data pixels"/>
                         <Button x:Name="BtnResetExportAreaToolbar" Content="↺ Reset Area" Style="{StaticResource SecondaryButton}" Padding="8,3" FontSize="10.5" Click="BtnResetExportArea_Click" IsEnabled="False" ToolTip="Reset custom export area back to full global DEM grid"/>
                     </StackPanel>
@@ -1037,12 +1070,12 @@
                                 </StackPanel>
 
                                 <!-- Center: Ground Span & Ground Resolution Scale -->
-                                <Border Grid.Column="1" HorizontalAlignment="Center" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="4" Padding="8,2.5" ToolTip="Physical ground dimensions and meters per pixel scale of current grid or export area">
+                                <Border Grid.Column="1" HorizontalAlignment="Center" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="4" Padding="7,2.5" Margin="2,0" ToolTip="Physical ground dimensions and meters per pixel scale of current grid or export area">
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                         <TextBlock x:Name="TxtGridSizeLabel" Text="SPAN:" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentExport}" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                        <TextBlock x:Name="TxtGlobalGridWidth" Text="—" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock x:Name="TxtGlobalGridWidth" Text="—" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                                         <TextBlock x:Name="TxtMetersPerPixelLabel" Text="SCALE:" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeTextMuted}" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                        <TextBlock x:Name="TxtSourceMetersPerPixel" Text="—" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtSourceMetersPerPixel" Text="—" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
 
@@ -1058,21 +1091,22 @@
                         </Border>
 
                         <!-- Main Preview Canvas Area (Row 1: Full-Bleed Viewport Space) -->
-                        <Grid Grid.Row="1" Panel.ZIndex="0">
+                        <Grid Grid.Row="1" Panel.ZIndex="0" Background="Transparent" MouseLeftButtonDown="ViewportCanvasArea_MouseLeftButtonDown">
                             <!-- Empty State Prompt -->
-                            <StackPanel x:Name="PnlEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Border Background="{DynamicResource ThemeBgWell}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" ToolTip="Physical width × height of the global grid or active custom export area using the Meters/Pixel scale" Padding="6,2,6,6">
-                                    <TextBlock Text="Drop DEM .tif / .tiff files here" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextSecondary}" HorizontalAlignment="Center"/>
+                            <StackPanel x:Name="PnlEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonDown="PnlEmptyState_MouseLeftButtonDown">
+                                <Border Background="{DynamicResource ThemeBgWell}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" ToolTip="Click to open Import window, or drag &amp; drop DEM .tif / .tiff files here" Padding="14,10">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <TextBlock Text="📁 Click to Import or Drop DEM Files / Folder" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextSecondary}" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Supports single or multi-tile GeoTIFF datasets (.tif, .tiff)" FontSize="11" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                                    </StackPanel>
                                 </Border>
                             </StackPanel>
 
-                            <!-- Hidden Legacy Overlay Hook to safely preserve C# bindings -->
-                            <Border x:Name="BdrGridLeftStatsOverlay" Visibility="Collapsed" IsHitTestVisible="False"/>
-
-                            <!-- 2D Grid Layout View with Overlaid Axis Legend (Full Canvas Viewport with Clean 16px Padding) -->
+                            <!-- 2D Mosaic View with Overlaid Axis Legend (Full Canvas Viewport with Clean 16px Padding) -->
                             <ScrollViewer x:Name="SvGridMosaic" Visibility="Collapsed" 
                                           HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" 
                                           Padding="16,12"
+                                          SizeChanged="SvGridMosaic_SizeChanged"
                                           PreviewMouseWheel="SvGridMosaic_PreviewMouseWheel"
                                           PreviewMouseDown="SvGridMosaic_PreviewMouseDown"
                                           PreviewMouseMove="SvGridMosaic_PreviewMouseMove"
@@ -1088,24 +1122,6 @@
                                 </Grid>
                             </ScrollViewer>
 
-                            <!-- 2D Viewport Scale Line Overlay (Bottom-Left of 2D Grid Layout, Overlaid on Grid) -->
-                            <Border x:Name="Bdr2DScaleBar" Panel.ZIndex="25" Visibility="Collapsed" Background="#D8141E18" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,5" Margin="12" HorizontalAlignment="Left" VerticalAlignment="Bottom" IsHitTestVisible="False">
-                                <StackPanel>
-                                    <TextBlock x:Name="Txt2DScaleBarLabel" Text="1.0 km" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" HorizontalAlignment="Center" Margin="0,0,0,2"/>
-                                    <Grid VerticalAlignment="Center">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Rectangle Grid.Column="0" Width="2" Height="8" Fill="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center"/>
-                                        <Rectangle x:Name="Rect2DScaleLine" Grid.Column="1" Width="90" Height="2.5" Fill="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center"/>
-                                        <Rectangle Grid.Column="2" Width="2" Height="8" Fill="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center"/>
-                                    </Grid>
-                                    <TextBlock x:Name="Txt2DScaleTotalSpan" Text="Grid Span: —" FontSize="9.5" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                </StackPanel>
-                            </Border>
-
                             <!-- Individual Tile Before / After Side-by-Side Inspector (Expanded Full Canvas Width) -->
                             <Grid x:Name="GrdTileInspector" Visibility="Collapsed" Margin="12,10">
                                 <Grid.ColumnDefinitions>
@@ -1120,7 +1136,7 @@
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="*"/>
                                         </Grid.RowDefinitions>
-                                        <TextBlock Text="BEFORE: RAW DEM (EMPTY / NODATA AREAS IN RED)" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentDanger}" Margin="0,0,0,8"/>
+                                        <TextBlock Text="BEFORE: RAW DEM (VOIDS / NODATA IN RED)" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentDanger}" Margin="0,0,0,8"/>
                                         <Image x:Name="ImgInspectorRaw" Grid.Row="1" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
                                     </Grid>
                                 </Border>
@@ -1138,7 +1154,7 @@
                             </Grid>
 
                             <!-- 3D GPU Heightmap Visualizer (Zero Padding / Maximum View Size) -->
-                            <Border x:Name="Grd3DVisualizer" Visibility="Collapsed" Background="#101813" BorderThickness="0" Padding="0" Margin="0" ClipToBounds="True" Cursor="SizeAll"
+                            <Border x:Name="Grd3DVisualizer" Visibility="Collapsed" Background="{DynamicResource ThemeBgWell}" BorderThickness="0" Padding="0" Margin="0" ClipToBounds="True" Cursor="SizeAll"
                                     MouseDown="Grd3DVisualizer_MouseDown"
                                     MouseMove="Grd3DVisualizer_MouseMove"
                                     MouseUp="Grd3DVisualizer_MouseUp"
@@ -1190,11 +1206,14 @@
                                     <!-- Top-Left "Return to Global Grid" Button (Appears in 3D Viewport when viewing a smaller custom selection cropped in Grid Layout) -->
                                     <Button x:Name="Btn3DReturnToGlobal" Visibility="Collapsed" Content="↺ Return to Global Grid" Style="{StaticResource PrimaryButton}" Padding="12,6" Margin="12" HorizontalAlignment="Left" VerticalAlignment="Top" Click="BtnResetExportArea_Click" ToolTip="Reset the custom cropped selection back to the full global DEM grid"/>
 
-                                    <!-- Bottom-Left 3D Viewport Scale Line Overlay -->
-                                    <Border x:Name="Bdr3DScaleBar" Background="#D8141E18" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,5" Margin="12" HorizontalAlignment="Left" VerticalAlignment="Bottom" IsHitTestVisible="False">
+                                    <!-- Bottom-Left 3D Viewport Scale and Size Statistics Panel -->
+                                    <Border x:Name="Bdr3DScaleBar" Background="{DynamicResource ThemeBgCard}" Opacity="0.95" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1.2" CornerRadius="6" Padding="12,8" Margin="12" HorizontalAlignment="Left" VerticalAlignment="Bottom" MaxWidth="380" IsHitTestVisible="True">
                                         <StackPanel>
-                                            <TextBlock x:Name="Txt3DScaleBarLabel" Text="1.0 km" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" HorizontalAlignment="Center" Margin="0,0,0,2"/>
-                                            <Grid VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <DockPanel Margin="0,0,0,3">
+                                                <TextBlock Text="TERRAIN SCALE GRID: " FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeTextMuted}" VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="Txt3DScaleBarLabel" Text="100 m Grid Square" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}"/>
+                                            </DockPanel>
+                                            <Grid VerticalAlignment="Center">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="Auto"/>
@@ -1204,28 +1223,69 @@
                                                 <Rectangle x:Name="Rect3DScaleLine" Grid.Column="1" Width="90" Height="2.5" Fill="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center"/>
                                                 <Rectangle Grid.Column="2" Width="2" Height="8" Fill="{DynamicResource ThemeAccentPrimary}" VerticalAlignment="Center"/>
                                             </Grid>
-                                            <TextBlock x:Name="Txt3DScaleTotalSpan" Text="Zone Span: —" FontSize="9.5" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                            <TextBlock x:Name="Txt3DScaleTotalSpan" Text="1 Grid Square = 100 m" FontSize="9.5" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,2,0,4"/>
+
+                                            <Separator Background="{DynamicResource ThemeBorderCard}" Margin="0,2,0,4"/>
+
+                                            <!-- 2. Export Resolution Parity -->
+                                            <DockPanel Margin="0,0,0,2">
+                                                <TextBlock Text="3D vs. EXPORT: " FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeTextMuted}" VerticalAlignment="Center"/>
+                                                <Border x:Name="Bdr3DExportParityBadge" Background="{DynamicResource ThemeAccentExport}" CornerRadius="3" Padding="5,1" HorizontalAlignment="Right" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                    <Border.ToolTip>
+                                                        <ToolTip MaxWidth="360" Padding="10,8">
+                                                            <StackPanel>
+                                                                <TextBlock x:Name="Txt3DExportParityTooltipTitle" Text="3D PREVIEW vs. EXPORT RESOLUTION" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                                <TextBlock x:Name="Txt3DExportParityTooltipDesc" Text="Compares the active 3D Viewport rendering tier against your configured Export Resolution." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                            </StackPanel>
+                                                        </ToolTip>
+                                                    </Border.ToolTip>
+                                                    <TextBlock x:Name="Txt3DExportParityBadge" Text="✓ MATCHES EXPORT" FontSize="8.5" FontWeight="Bold" Foreground="#FFFFFF"/>
+                                                </Border>
+                                            </DockPanel>
+                                            <TextBlock x:Name="Txt3DExportParityDesc" Text="3D preview tier matches your export settings (2048 × 2048 px)." FontSize="9.5" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+
+                                            <Separator Background="{DynamicResource ThemeBorderCard}" Margin="0,2,0,4"/>
+
+                                            <!-- 3. Source DEM Fidelity -->
+                                            <DockPanel Margin="0,0,0,2">
+                                                <TextBlock Text="3D vs. SOURCE DEM: " FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeTextMuted}" VerticalAlignment="Center"/>
+                                                <Border x:Name="Bdr3DSourceFidelityBadge" Background="{DynamicResource ThemeAccentExport}" CornerRadius="3" Padding="5,1" HorizontalAlignment="Right" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                    <Border.ToolTip>
+                                                        <ToolTip MaxWidth="360" Padding="10,8">
+                                                            <StackPanel>
+                                                                <TextBlock x:Name="Txt3DSourceFidelityTooltipTitle" Text="3D PREVIEW vs. SOURCE DEM FIDELITY" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                                <TextBlock x:Name="Txt3DSourceFidelityTooltipDesc" Text="Compares the active 3D texture and mesh geometry against the native source DEM pixel grid." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                            </StackPanel>
+                                                        </ToolTip>
+                                                    </Border.ToolTip>
+                                                    <TextBlock x:Name="Txt3DSourceFidelityBadge" Text="✓ 1:1 SOURCE PARITY" FontSize="8.5" FontWeight="Bold" Foreground="#FFFFFF"/>
+                                                </Border>
+                                            </DockPanel>
+                                            <TextBlock x:Name="Txt3DSourceFidelityDesc" Text="Matches native source DEM resolution (10.0 m/px • Zero blur)." FontSize="9.5" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+
+                                            <Separator Background="{DynamicResource ThemeBorderCard}" Margin="0,2,0,4"/>
+
+                                            <!-- 4. Mesh & Texture Telemetry -->
+                                            <TextBlock x:Name="Txt3DGpuHudTitle" Text="Texture: 2K (2048 × 2048) • Mesh: 512 × 512 quads" FontSize="9.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextPrimary}"/>
+                                            <TextBlock x:Name="Txt3DQuadElevationInfo" Text="Quad Step: ~40 m/quad • Full Global Grid [0.0m .. 500.0m]" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,1,0,0"/>
                                         </StackPanel>
                                     </Border>
 
-                                    <!-- Bottom-Right GPU 3D Heightmap Stats & Controls Badge -->
-                                    <Border Background="#D8141E18" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,5" Margin="12" HorizontalAlignment="Right" VerticalAlignment="Bottom" IsHitTestVisible="False">
-                                        <StackPanel>
-                                            <TextBlock x:Name="Txt3DGpuHudTitle" Text="GPU 3D HEIGHTMAP • 2K (2048 × 2048)" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" HorizontalAlignment="Right"/>
-                                            <TextBlock x:Name="Txt3DGpuHudSub" Text="Left-Drag: Orbit • Right/Middle-Drag: Pan • Scroll Wheel: Zoom" FontSize="10.5" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,2,0,0" HorizontalAlignment="Right"/>
-                                        </StackPanel>
+                                    <!-- Bottom-Right 3D Navigation Controls Hint -->
+                                    <Border Background="{DynamicResource ThemeBgCard}" Opacity="0.92" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,5" Margin="12" HorizontalAlignment="Right" VerticalAlignment="Bottom" IsHitTestVisible="False">
+                                        <TextBlock x:Name="Txt3DGpuHudSub" Text="Left-Drag: Orbit • Right/Middle-Drag: Pan • Scroll Wheel: Zoom" FontSize="9.5" Foreground="{DynamicResource ThemeTextSecondary}"/>
                                     </Border>
 
                                     <!-- Top-Right 3D Visualizer Options Card (Only visible inside 3D Viewport) -->
-                                    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" Width="184" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1.2" CornerRadius="6" Padding="8,7" Opacity="0.95">
+                                    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" Width="210" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1.2" CornerRadius="6" Padding="8,6" Opacity="0.95">
                                         <StackPanel x:Name="PnlViewport3DBar" Visibility="Collapsed">
-                                            <TextBlock Text="3D VISUALIZER OPTIONS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,4"/>
+                                            <TextBlock Text="3D VISUALIZER OPTIONS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,3"/>
                                             <CheckBox x:Name="Chk3DSimulateWater" Content="Simulate Water" FontSize="11" IsChecked="True" Checked="Preview3DOption_Changed" Unchecked="Preview3DOption_Changed" ToolTip="Shades large, low-elevation flat terrain regions with water blue colors"/>
 
                                             <!-- Water Shader Slope Limit & Altitude Limit Sliders -->
-                                            <Border x:Name="Bdr3DWaterSliders" Background="{DynamicResource ThemeBgWell}" CornerRadius="5" Padding="7,5" Margin="0,3,0,5">
+                                            <Border x:Name="Bdr3DWaterSliders" Background="{DynamicResource ThemeBgWell}" CornerRadius="5" Padding="7,4" Margin="0,2,0,4">
                                                 <StackPanel>
-                                                    <Grid Margin="0,0,0,2">
+                                                    <Grid Margin="0,0,0,1">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="*"/>
                                                             <ColumnDefinition Width="Auto"/>
@@ -1233,9 +1293,9 @@
                                                         <TextBlock Grid.Column="0" Text="Water Slope Limit:" FontSize="9.5" Foreground="{DynamicResource ThemeTextSecondary}"/>
                                                         <TextBlock x:Name="Txt3DWaterSlopeLabel" Grid.Column="1" Text="0.12m" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}"/>
                                                     </Grid>
-                                                    <Slider x:Name="Sld3DWaterSlopeLimit" Minimum="0.01" Maximum="1.50" Value="0.12" TickFrequency="0.01" IsSnapToTickEnabled="True" ValueChanged="Sld3DWaterParam_ValueChanged" Margin="0,0,0,5" ToolTip="Maximum elevation variation (meters) across neighborhood rings to classify terrain as flat water"/>
+                                                    <Slider x:Name="Sld3DWaterSlopeLimit" Minimum="0.01" Maximum="1.50" Value="0.12" TickFrequency="0.01" IsSnapToTickEnabled="True" ValueChanged="Sld3DWaterParam_ValueChanged" Margin="0,0,0,4" ToolTip="Maximum elevation variation (meters) across neighborhood rings to classify terrain as flat water"/>
 
-                                                    <Grid Margin="0,0,0,2">
+                                                    <Grid Margin="0,0,0,1">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="*"/>
                                                             <ColumnDefinition Width="Auto"/>
@@ -1248,17 +1308,30 @@
                                             </Border>
 
                                             <CheckBox x:Name="Chk3DHighlightQuadEdges" Content="Highlight Quad Edges" FontSize="11" IsChecked="False" Checked="Preview3DOption_Changed" Unchecked="Preview3DOption_Changed" ToolTip="Highlights the 3D terrain mesh quad edges across the surface"/>
+                                            <CheckBox x:Name="Chk3DOverlayScaleGrid" Content="Overlay Scale Grid" FontSize="11" IsChecked="False" Checked="Preview3DOption_Changed" Unchecked="Preview3DOption_Changed" ToolTip="Overlays a dynamic distance scale grid directly on the 3D terrain surface that adapts to camera zoom" Margin="0,3,0,0"/>
 
-                                            <TextBlock Text="3D Resolution:" FontSize="10.5" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,6,0,3"/>
-                                            <ComboBox x:Name="Cmb3DResolution" Height="24" SelectedIndex="1" SelectionChanged="Cmb3DResolution_SelectionChanged" VerticalContentAlignment="Center">
+                                            <TextBlock Text="3D Resolution:" FontSize="10.5" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,5,0,2"/>
+                                            <ComboBox x:Name="Cmb3DResolution" Height="24" SelectedIndex="0" SelectionChanged="Cmb3DResolution_SelectionChanged" VerticalContentAlignment="Center" ToolTip="Select 3D resolution. 'Match Export Res' automatically synchronizes 3D preview with the export resolution configured in the side panel. Selecting a fixed size (1K–16K) decouples 3D preview for independent performance control.">
+                                                <ComboBoxItem x:Name="Cbi3DResMatchExport" Content="Match Export Res"/>
+                                                <ComboBoxItem x:Name="Cbi3DResMatchSource" Content="Match Source DEM (Native)"/>
                                                 <ComboBoxItem Content="1K (1024 × 1024)"/>
                                                 <ComboBoxItem Content="2K (2048 × 2048)"/>
                                                 <ComboBoxItem Content="4K (4096 × 4096)"/>
                                                 <ComboBoxItem Content="8K (8192 × 8192)"/>
                                                 <ComboBoxItem Content="16K (16384 × 16384)"/>
                                             </ComboBox>
+                                            <TextBlock x:Name="Txt3DResInterplayHint" Text="✓ Linked to Export Target" FontSize="9" Foreground="{DynamicResource ThemeAccentExport}" Margin="0,2,0,0" TextWrapping="Wrap" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                <TextBlock.ToolTip>
+                                                    <ToolTip MaxWidth="360" Padding="10,8">
+                                                        <StackPanel>
+                                                            <TextBlock x:Name="Txt3DResInterplayTooltipTitle" Text="3D PREVIEW RESOLUTION LINK" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                            <TextBlock x:Name="Txt3DResInterplayTooltipDesc" Text="Shows how the active 3D Viewport resolution tier compares against your configured Export Resolution and Source DEM." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                        </StackPanel>
+                                                    </ToolTip>
+                                                </TextBlock.ToolTip>
+                                            </TextBlock>
 
-                                            <TextBlock Text="Shading Palette:" FontSize="10.5" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,7,0,3"/>
+                                            <TextBlock Text="Shading Palette:" FontSize="10.5" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,5,0,2"/>
                                             <ComboBox x:Name="Cmb3DShading" Height="24" SelectedIndex="0" SelectionChanged="Cmb3DShading_SelectionChanged" VerticalContentAlignment="Center">
                                                 <ComboBoxItem Content="Hypsometric Topo"/>
                                                 <ComboBoxItem Content="Grayscale (0–1)"/>
@@ -1266,7 +1339,7 @@
                                                 <ComboBoxItem Content="Desert Canyon"/>
                                             </ComboBox>
 
-                                            <TextBlock Text="Z-Scale (Height / Width):" FontSize="10.5" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,7,0,3"/>
+                                            <TextBlock Text="Z-Scale (Height / Width):" FontSize="10.5" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,5,0,2"/>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>
@@ -1277,7 +1350,7 @@
                                                 <Button Grid.Column="2" Content="Auto" Style="{StaticResource SecondaryButton}" Padding="8,2" FontSize="10.5" Click="BtnAuto3DZScale_Click" ToolTip="Automatically derive Z-Scale from active global or selected zone dimensions"/>
                                             </Grid>
 
-                                            <Grid Margin="0,8,0,6">
+                                            <Grid Margin="0,6,0,5">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="*"/>
@@ -1290,9 +1363,9 @@
                                         </StackPanel>
                                     </Border>
 
-                                    <!-- Loading Indicator Overlay when building GPU Texture -->
-                                    <Border x:Name="Bdr3DLoadingOverlay" Visibility="Collapsed" Background="#B8101813" CornerRadius="6" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="18,10" BorderBrush="{DynamicResource ThemeAccentPrimary}" BorderThickness="1.5" IsHitTestVisible="False">
-                                        <TextBlock x:Name="Txt3DLoadingMessage" Text="Building GPU 3D Heightmap..." FontSize="13" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}"/>
+                                    <!-- Loading Indicator Overlay when building 3D Texture -->
+                                    <Border x:Name="Bdr3DLoadingOverlay" Visibility="Collapsed" Background="{DynamicResource ThemeBgWell}" Opacity="0.88" CornerRadius="6" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="18,10" BorderBrush="{DynamicResource ThemeAccentPrimary}" BorderThickness="1.5" IsHitTestVisible="False">
+                                        <TextBlock x:Name="Txt3DLoadingMessage" Text="Building 3D Heightmap..." FontSize="13" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}"/>
                                     </Border>
                                 </Grid>
                             </Border>
@@ -1300,7 +1373,7 @@
                     </Grid>
                 </Border>
 
-                <!-- BOTTOM DATA TABLES: TAB 1 = LOADED DEM TILES, TAB 2 = EXPECTED OUTPUT FILES, TAB 3 = DYNAMIC SCALE & FIDELITY MATRIX -->
+                <!-- BOTTOM DATA TABLES: TAB 1 = LOADED DEM TILES, TAB 2 = EXPECTED OUTPUT FILES, TAB 3 = SCALE MATRIX -->
                 <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="10" Margin="0,10,0,0">
                     <Grid>
                         <Grid.RowDefinitions>
@@ -1318,7 +1391,7 @@
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                 <RadioButton Style="{StaticResource PageTabButton}" x:Name="RbTabLoadedTiles" IsChecked="True" GroupName="BottomTableTabs" Content="LOADED DEM TILES" Checked="BottomTableTab_Changed" Height="26"/>
                                 <RadioButton x:Name="RbTabExpectedOutputs" GroupName="BottomTableTabs" Content="EXPECTED OUTPUT FILES" Style="{StaticResource PageTabButton}" Checked="BottomTableTab_Changed" Height="26"/>
-                                <RadioButton x:Name="RbTabScaleMatrix" GroupName="BottomTableTabs" Content="DYNAMIC SCALE &amp; FIDELITY MATRIX" Style="{StaticResource PageTabButton}" Checked="BottomTableTab_Changed" Height="26"/>
+                                <RadioButton x:Name="RbTabScaleMatrix" GroupName="BottomTableTabs" Content="SCALE MATRIX" Style="{StaticResource PageTabButton}" Checked="BottomTableTab_Changed" Height="26"/>
                             </StackPanel>
                             <TextBlock x:Name="TxtBottomTableHint" Grid.Column="2" Text="Use '✕' to remove a tile • Click a row to inspect" FontSize="10.5" Foreground="{DynamicResource ThemeTextMuted}" VerticalAlignment="Center"/>
                         </Grid>
@@ -1331,6 +1404,10 @@
                                   SelectionMode="Single"
                                   SelectionChanged="DgTiles_SelectionChanged"
                                   CellEditEnding="DgTiles_CellEditEnding"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto"
                                   Background="{DynamicResource ThemeBgWell}"
                                   RowBackground="{DynamicResource ThemeBgCard}"
                                   AlternatingRowBackground="{DynamicResource ThemeBgRowAlt}"
@@ -1383,27 +1460,27 @@
                                 <DataGridTextColumn Header="File Name" Binding="{Binding FileName}" IsReadOnly="True" Width="230"/>
                                 <DataGridTextColumn Header="Status" Binding="{Binding Status}" IsReadOnly="True" Width="170"/>
 
-                                <DataGridTemplateColumn x:Name="ColTileFillOverride" Header="Tile Fill Method" Width="138" Visibility="Collapsed">
+                                <DataGridTemplateColumn x:Name="ColTileFillOverride" Header="Tile Fill Method" Width="154" Visibility="Collapsed">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <ComboBox ItemsSource="{x:Static models:DemTile.AvailableFillOverrides}"
                                                       SelectedItem="{Binding FillOverride, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                       SelectionChanged="RowFillOverrideCombo_SelectionChanged"
                                                       Tag="{Binding}"
-                                                      Height="22"
+                                                      Height="24"
                                                       FontSize="11"/>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
 
-                                <DataGridTextColumn Header="Empty %" Binding="{Binding VoidPercentage, StringFormat=\{0:F2\}%}" IsReadOnly="True" Width="68"/>
+                                <DataGridTextColumn Header="Void %" Binding="{Binding VoidPercentage, StringFormat=\{0:F2\}%}" IsReadOnly="True" Width="68"/>
                                 <DataGridTextColumn Header="Elev Range" Binding="{Binding ElevationRange, StringFormat=\{0:F2\}}" IsReadOnly="True" Width="82"/>
                                 <DataGridTextColumn Header="Tile Min" Binding="{Binding MinElevation, StringFormat=\{0:F2\}}" IsReadOnly="True" Width="78"/>
                                 <DataGridTextColumn Header="Tile Max" Binding="{Binding MaxElevation, StringFormat=\{0:F2\}}" IsReadOnly="True" Width="78"/>
                                 <DataGridTextColumn Header="Global X" Binding="{Binding ColCoordinateLabel}" IsReadOnly="True" Width="76"/>
                                 <DataGridTextColumn Header="Global Y" Binding="{Binding RowCoordinateLabel}" IsReadOnly="True" Width="76"/>
-                                <DataGridTextColumn Header="Grid Col" Binding="{Binding GridCol, UpdateSourceTrigger=PropertyChanged}" Width="64"/>
-                                <DataGridTextColumn Header="Grid Row" Binding="{Binding GridRow, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                <DataGridTextColumn Header="Matrix Col" Binding="{Binding GridCol, UpdateSourceTrigger=PropertyChanged}" Width="64"/>
+                                <DataGridTextColumn Header="Matrix Row" Binding="{Binding GridRow, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
                             </DataGrid.Columns>
                         </DataGrid>
 
@@ -1415,6 +1492,10 @@
                                   CanUserDeleteRows="False"
                                   IsReadOnly="True"
                                   SelectionMode="Single"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto"
                                   Background="{DynamicResource ThemeBgWell}"
                                   RowBackground="{DynamicResource ThemeBgCard}"
                                   AlternatingRowBackground="{DynamicResource ThemeBgRowAlt}"
@@ -1455,122 +1536,162 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="Output File Name" Binding="{Binding OutputFileName}" Width="175"/>
+                                <DataGridTextColumn Header="Output File Name" Binding="{Binding OutputFileName}" Width="200"/>
                                 <DataGridTextColumn Header="Grid Slot" Binding="{Binding GridSlotLabel}" Width="95"/>
-                                <DataGridTextColumn Header="File Format" Binding="{Binding FormatDescription}" Width="145"/>
-                                <DataGridTextColumn Header="Output Resolution" Binding="{Binding OutputResolutionLabel}" Width="118"/>
+                                <DataGridTextColumn Header="Output Resolution" Binding="{Binding OutputResolutionLabel}" Width="120"/>
                                 <DataGridTextColumn Header="Source Area (px)" Binding="{Binding SourceAreaPixelsLabel}" Width="115"/>
-                                <DataGridTextColumn Header="Export / Source Ratio" Binding="{Binding ResolutionRatioLabel}" Width="125"/>
+                                <DataGridTextColumn Header="Export / Source Ratio" Binding="{Binding ResolutionRatioLabel}" Width="135"/>
                                 <DataGridTextColumn Header="Physical Size" Binding="{Binding PhysicalSizeLabel}" Width="115"/>
-                                <DataGridTextColumn Header="Elev Range" Binding="{Binding SubElevationRange, StringFormat=\{0:F2\}m}" Width="82"/>
-                                <DataGridTextColumn Header="Min Elev" Binding="{Binding SubMinElevation, StringFormat=\{0:F2\}m}" Width="78"/>
-                                <DataGridTextColumn Header="Max Elev" Binding="{Binding SubMaxElevation, StringFormat=\{0:F2\}m}" Width="78"/>
-                                <DataGridTextColumn Header="Est. Size" Binding="{Binding EstimatedFileSizeLabel}" Width="78"/>
-                                <DataGridTextColumn Header="Destination Path" Binding="{Binding FullOutputPath}" Width="*"/>
+                                <DataGridTextColumn Header="Elev Range" Binding="{Binding SubElevationRange, StringFormat=\{0:F2\}m}" Width="85"/>
+                                <DataGridTextColumn Header="Min Elev" Binding="{Binding SubMinElevation, StringFormat=\{0:F2\}m}" Width="80"/>
+                                <DataGridTextColumn Header="Max Elev" Binding="{Binding SubMaxElevation, StringFormat=\{0:F2\}m}" Width="80"/>
+                                <DataGridTextColumn Header="Est. Size" Binding="{Binding EstimatedFileSizeLabel}" Width="80"/>
                             </DataGrid.Columns>
                         </DataGrid>
 
-                        <!-- Tab 3: Dynamic Scale & Fidelity Matrix Panel -->
-                        <Border x:Name="PnlScaleMatrix" Grid.Row="1" Visibility="Collapsed" Background="{DynamicResource ThemeBgWell}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                        <!-- Tab 3: Scale Matrix Panel -->
+                        <Border x:Name="PnlScaleMatrix" Grid.Row="1" Visibility="Collapsed" Background="{DynamicResource ThemeBgWell}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="6" Padding="10,6">
                             <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="*"/>
-                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.25*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="1.25*"/>
+                                </Grid.ColumnDefinitions>
 
-                                <!-- Top 5 Dynamic Pillars -->
-                                <Grid Grid.Row="0" Margin="0,0,0,8">
+                                <!-- Left Side: 2x2 Grid for the 4 Metric Cards -->
+                                <Grid Grid.Column="0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="6"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="6"/>
                                         <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="6"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="6"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="6"/>
-                                        <ColumnDefinition Width="1.25*"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <!-- Pillar 1: Export Region Physical Span -->
-                                    <Border Grid.Column="0" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,6">
-                                        <StackPanel>
-                                            <TextBlock Text="1. REGION GROUND SPAN" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentExport}" Margin="0,0,0,2"/>
-                                            <TextBlock x:Name="TxtMatrixRegionSpanKm" Text="—" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}"/>
-                                            <TextBlock x:Name="TxtMatrixRegionSpanMeters" Text="—" FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,0"/>
-                                            <TextBlock x:Name="TxtMatrixRegionType" Text="Full Global Mosaic" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,2,0,0"/>
+                                    <!-- Card 1: Region Ground Span (Row 0, Col 0) -->
+                                    <Border Grid.Row="0" Grid.Column="0" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="8,5">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <TextBlock Text="REGION GROUND SPAN" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentExport}" Margin="0,0,0,2" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixRegionSpanKm" Text="—" FontSize="15.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixRegionSpanMeters" Text="—" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,1" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixRegionType" Text="Full Global Mosaic" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Center" TextAlignment="Center"/>
                                         </StackPanel>
                                     </Border>
 
-                                    <!-- Pillar 2: Export Resolution & Layout -->
-                                    <Border Grid.Column="2" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,6">
-                                        <StackPanel>
-                                            <TextBlock Text="2. EXPORT RESOLUTION" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,2"/>
-                                            <TextBlock x:Name="TxtMatrixTotalPixels" Text="—" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}"/>
-                                            <TextBlock x:Name="TxtMatrixPerTileResolution" Text="—" FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,0"/>
-                                            <TextBlock x:Name="TxtMatrixOutputLayout" Text="1 Single Merged File" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,2,0,0"/>
+                                    <!-- Card 2: Export Resolution & Layout (Row 0, Col 2) -->
+                                    <Border Grid.Row="0" Grid.Column="2" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="8,5">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <TextBlock Text="EXPORT RESOLUTION" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,2" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixTotalPixels" Text="—" FontSize="15.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixPerTileResolution" Text="—" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,1" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixOutputLayout" Text="1 Single Merged File" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrix3DPreviewSync" Text="3D Preview: Linked (Matches Export)" FontSize="8.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentExport}" Margin="0,1,0,0" HorizontalAlignment="Center" TextAlignment="Center" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                <TextBlock.ToolTip>
+                                                    <ToolTip MaxWidth="360" Padding="10,8">
+                                                        <StackPanel>
+                                                            <TextBlock x:Name="TxtMatrix3DPreviewSyncTooltipTitle" Text="3D PREVIEW vs. EXPORT RESOLUTION" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                            <TextBlock x:Name="TxtMatrix3DPreviewSyncTooltipDesc" Text="Compares the active 3D Viewport rendering tier against your configured Export Resolution." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                        </StackPanel>
+                                                    </ToolTip>
+                                                </TextBlock.ToolTip>
+                                            </TextBlock>
                                         </StackPanel>
                                     </Border>
 
-                                    <!-- Pillar 3: Ground Scale (Meters Per Pixel) -->
-                                    <Border Grid.Column="4" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,6">
-                                        <StackPanel>
-                                            <TextBlock Text="3. GROUND RESOLUTION" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentWarning}" Margin="0,0,0,2"/>
-                                            <TextBlock x:Name="TxtMatrixGroundScaleMpp" Text="—" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}"/>
-                                            <TextBlock x:Name="TxtMatrixSourceScaleMpp" Text="Source DEM: —" FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,0"/>
-                                            <TextBlock Text="Engine Quad / Grid Step" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,2,0,0"/>
+                                    <!-- Card 3: Ground Resolution with Export Quality Indicator Tag & ToolTip (Row 2, Col 0) -->
+                                    <Border Grid.Row="2" Grid.Column="0" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="8,5">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <TextBlock Text="GROUND RES" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentWarning}" Margin="0,0,0,2" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <!-- Export Quality Indicator Tag positioned directly to the left of the ground scale m/px text -->
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,1">
+                                                <Border x:Name="BdrMatrixFidelityBadge" Background="{DynamicResource ThemeAccentExport}" CornerRadius="3" Padding="5,1.5" VerticalAlignment="Center" Margin="0,0,6,0" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                    <Border.ToolTip>
+                                                        <ToolTip MaxWidth="360" Padding="10,8">
+                                                            <StackPanel>
+                                                                <TextBlock x:Name="TxtMatrixFidelityTitle" Text="NATIVE PIXEL-TO-METER FIDELITY" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                                <TextBlock x:Name="TxtMatrixFidelityDesc" Text="Export resolution matches source data pixel density. Zero geometric blurring or artificial interpolation." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                                <Separator Background="{DynamicResource ThemeBorderCard}" Margin="0,4,0,4"/>
+                                                                <TextBlock Text="3D Preview Resolution Interplay:" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentPrimary}" Margin="0,0,0,2"/>
+                                                                <TextBlock x:Name="TxtMatrixFidelity3DHint" Text="3D preview resolution tracks your export settings for authentic previewing." FontSize="9.5" Foreground="{DynamicResource ThemeTextMuted}" TextWrapping="Wrap"/>
+                                                            </StackPanel>
+                                                        </ToolTip>
+                                                    </Border.ToolTip>
+                                                    <TextBlock x:Name="TxtMatrixFidelityRatio" Text="1.00× PARITY" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock x:Name="TxtMatrixGroundScaleMpp" Text="—" FontSize="15.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <TextBlock x:Name="TxtMatrixSourceScaleMpp" Text="Source DEM: —" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,1" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrix3DGroundRes" Text="3D Preview: —" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Center" TextAlignment="Center" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                <TextBlock.ToolTip>
+                                                    <ToolTip MaxWidth="360" Padding="10,8">
+                                                        <StackPanel>
+                                                            <TextBlock x:Name="TxtMatrix3DGroundResTooltipTitle" Text="3D VIEWPORT GROUND RESOLUTION" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                            <TextBlock x:Name="TxtMatrix3DGroundResTooltipDesc" Text="Shows both the 3D shader texture resolution (m/px) and the 3D vertex mesh quad step (m/quad)." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                        </StackPanel>
+                                                    </ToolTip>
+                                                </TextBlock.ToolTip>
+                                            </TextBlock>
                                         </StackPanel>
                                     </Border>
 
-                                    <!-- Pillar 4: Format & Storage Estimates -->
-                                    <Border Grid.Column="6" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="9,6">
-                                        <StackPanel>
-                                            <TextBlock Text="4. ESTIMATED STORAGE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,2"/>
-                                            <TextBlock x:Name="TxtMatrixEstFileSize" Text="—" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}"/>
-                                            <TextBlock x:Name="TxtMatrixFormatDesc" Text="16-Bit Norm PNG" FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,0"/>
-                                            <TextBlock x:Name="TxtMatrixBatchSummary" Text="Total Files: 1" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" Margin="0,2,0,0"/>
+                                    <!-- Card 4: Estimated Storage & Format (Row 2, Col 2) -->
+                                    <Border Grid.Row="2" Grid.Column="2" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="8,5">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <TextBlock Text="ESTIMATED STORAGE" FontSize="9.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,2" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixEstFileSize" Text="—" FontSize="15.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixFormatDesc" Text="16-Bit Norm PNG" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeTextSecondary}" Margin="0,1,0,1" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                            <TextBlock x:Name="TxtMatrixBatchSummary" Text="Total Files: 1" FontSize="9" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Center" TextAlignment="Center"/>
                                         </StackPanel>
-                                    </Border>
-
-                                    <!-- Pillar 5: Human Reference & Pixel Step Scale -->
-                                    <Border Grid.Column="8" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="8,5">
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="*"/>
-                                            </Grid.RowDefinitions>
-                                            <DockPanel Grid.Row="0" Margin="0,0,0,3">
-                                                <TextBlock Text="5. HUMAN GROUND SCALE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentExport}" DockPanel.Dock="Left"/>
-                                                <TextBlock x:Name="TxtMatrixHumanRatio" Text="1 Step = —" FontSize="8.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentWarning}" HorizontalAlignment="Right" DockPanel.Dock="Right"/>
-                                            </DockPanel>
-
-                                            <!-- Scaled Human & Pixel Step Canvas -->
-                                            <Border Grid.Row="1" Background="{DynamicResource ThemeBgWell}" CornerRadius="4" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="0.8" ClipToBounds="True" MinHeight="44">
-                                                <Canvas x:Name="CnvHumanScaleReference" ClipToBounds="True" SizeChanged="CnvHumanScaleReference_SizeChanged"/>
-                                            </Border>
-                                        </Grid>
                                     </Border>
                                 </Grid>
 
-                                <!-- Bottom Dynamic Fidelity Ratio Gauge & Explanation Bar -->
-                                <Border Grid.Row="1" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="10,6">
+                                <!-- Right Side: Expanded Human Ground Scale Panel -->
+                                <Border Grid.Column="2" Background="{DynamicResource ThemeBgCard}" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="1" CornerRadius="5" Padding="10,6">
                                     <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Border x:Name="BdrMatrixFidelityBadge" Grid.Column="0" Background="{DynamicResource ThemeAccentExport}" CornerRadius="4" Padding="9,3" Margin="0,0,12,0" VerticalAlignment="Center">
-                                            <TextBlock x:Name="TxtMatrixFidelityRatio" Text="1.00× (1:1 PARITY)" FontSize="11" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center"/>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                                            <TextBlock Text="HUMAN GROUND SCALE &amp; RESOLUTION PROFILE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentExport}" VerticalAlignment="Center" DockPanel.Dock="Left"/>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right" VerticalAlignment="Center">
+                                                <Button x:Name="BtnToggleHumanScaleMode" Content="3D Viewport Sync: Auto" Style="{StaticResource SecondaryButton}" Padding="5,1" FontSize="8" Margin="0,0,6,0" Click="BtnToggleHumanScaleMode_Click" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                    <Button.ToolTip>
+                                                        <ToolTip MaxWidth="360" Padding="10,8">
+                                                            <StackPanel>
+                                                                <TextBlock Text="HUMAN SCALE REFERENCE MODE" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                                <TextBlock x:Name="TxtHumanScaleModeTooltipDesc" Text="Click to toggle whether the Human Ground Scale graph illustrates the Export Resolution (m/px) or the active 3D Viewport Resolution." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                            </StackPanel>
+                                                        </ToolTip>
+                                                    </Button.ToolTip>
+                                                </Button>
+                                                <TextBlock x:Name="TxtMatrixHumanRatio" Text="1 Px = —" FontSize="8.5" FontWeight="SemiBold" Foreground="{DynamicResource ThemeAccentWarning}" VerticalAlignment="Center" Cursor="Help" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000">
+                                                    <TextBlock.ToolTip>
+                                                        <ToolTip MaxWidth="360" Padding="10,8">
+                                                            <StackPanel>
+                                                                <TextBlock x:Name="TxtMatrixHumanRatioTooltipTitle" Text="GROUND RESOLUTION STEP COMPARISON" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}" Margin="0,0,0,3"/>
+                                                                <TextBlock x:Name="TxtMatrixHumanRatioTooltipDesc" Text="Compares physical pixel/quad step spacing against a 1.8m human silhouette." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
+                                                            </StackPanel>
+                                                        </ToolTip>
+                                                    </TextBlock.ToolTip>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </DockPanel>
+
+                                        <!-- Scaled Human & Smooth Terrain Profile Canvas with Overlaid Zoom Controls -->
+                                        <Border Grid.Row="1" Background="{DynamicResource ThemeBgWell}" CornerRadius="4" BorderBrush="{DynamicResource ThemeBorderCard}" BorderThickness="0.8" ClipToBounds="True" MinHeight="80">
+                                            <Grid>
+                                                <Canvas x:Name="CnvHumanScaleReference" ClipToBounds="True" SizeChanged="CnvHumanScaleReference_SizeChanged"/>
+                                                <!-- Stacked square + and - buttons positioned underneath the right hill -->
+                                                <StackPanel x:Name="PnlHumanScaleZoomButtons" Orientation="Vertical" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="0,0,0,8" Panel.ZIndex="10">
+                                                    <Button x:Name="BtnHumanScaleZoomIn" Content="+" Width="18" Height="18" Padding="0" FontSize="12" FontWeight="Bold" Style="{StaticResource SecondaryButton}" Click="BtnHumanScaleZoomIn_Click" ToolTip="Increase right hill scale (zoom out frame to fit larger mountain)"/>
+                                                    <Button x:Name="BtnHumanScaleZoomOut" Content="−" Width="18" Height="18" Padding="0" FontSize="12" FontWeight="Bold" Style="{StaticResource SecondaryButton}" Margin="0,2,0,0" Click="BtnHumanScaleZoomOut_Click" ToolTip="Decrease right hill scale (zoom in frame towards human scale)"/>
+                                                </StackPanel>
+                                            </Grid>
                                         </Border>
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock x:Name="TxtMatrixFidelityTitle" Text="NATIVE PIXEL-TO-METER FIDELITY" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource ThemeTextPrimary}"/>
-                                            <TextBlock x:Name="TxtMatrixFidelityDesc" Text="Export resolution matches source data pixel density. Zero geometric blurring or artificial interpolation." FontSize="10" Foreground="{DynamicResource ThemeTextSecondary}" TextWrapping="Wrap"/>
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
-                                            <TextBlock Text="VERTICAL RELIEF (ΔZ):" FontSize="8.5" FontWeight="Bold" Foreground="{DynamicResource ThemeTextMuted}" HorizontalAlignment="Right"/>
-                                            <TextBlock x:Name="TxtMatrixElevationRange" Text="—" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource ThemeAccentWarning}" HorizontalAlignment="Right"/>
-                                        </StackPanel>
                                     </Grid>
                                 </Border>
                             </Grid>

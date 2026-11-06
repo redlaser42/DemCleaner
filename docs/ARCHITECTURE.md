@@ -198,14 +198,16 @@ flowchart TD
 - Maps continuous sub-tile normalized coordinates $[0..1]$ to source mosaic space and samples elevations via bilinear interpolation between adjacent pixel centers.
 
 ### 5. 3D GPU Heightmap Generation (`Build3DHeightmapAssets`)
-- Generates a shaded albedo texture (`WriteableBitmap`) and displaced terrain geometry (`MeshGeometry3D`) with a geological base skirt.
-- Scales normal strength and mesh tessellation with resolution tier:
-  - 1K: 4,096 quads ($64 \times 64$)
-  - 2K: 16,384 quads ($128 \times 128$)
-  - 4K: 65,536 quads ($256 \times 256$)
-  - 8K: 262,144 quads ($512 \times 512$)
+- Generates a shaded albedo texture (`WriteableBitmap`) and displaced terrain geometry (`MeshGeometry3D`) with a geological base skirt using pixel-center aligned (`+0.5 px`) bilinear mosaic sampling.
+- Scales mesh tessellation with resolution tier while maintaining physically consistent slope-normal lighting across all tiers:
+  - 1K: 65,536 quads ($256 \times 256$)
+  - 2K: 262,144 quads ($512 \times 512$)
+  - 4K: 589,824 quads ($768 \times 768$)
+  - 8K: 1,048,576 quads ($1024 \times 1024$)
   - 16K: 1,048,576 quads ($1024 \times 1024$), texture capped at $8192 \times 8192$ (Direct3D 9 hardware limit) with $1/16384$ sub-pixel micro-normal sampling.
+- Uses cooperative cancellation (`cancellationToken.IsCancellationRequested`) inside parallel worker loops so superseded 3D viewport rebuilds exit cleanly without throwing first-chance `OperationCanceledException` storms in debuggers.
 - All generated WPF 3D assets are frozen (`.Freeze()`) before returning to the UI thread.
+- **Dynamic 3D Scale Grid Overlay & HUD Legend**: Optional emissive material layer (`MaterialGroup`) composed over the diffuse terrain bitmap. Computes metric camera span on zoom events and dynamically rescales tiled texture coordinates across standardized distance increments (from 1m to 500km) in real time without regenerating 3D mesh geometry or rebaking heightmaps. The bottom-right 3D scale bar widget dynamically calculates the screen pixel width of the blue surface grid squares and synchronizes label and bar length on every camera zoom frame.
 
 ---
 
@@ -237,7 +239,7 @@ The following conditions are verified design guarantees that must be maintained:
 ## 7. Architectural Risks & Technical Debt
 
 1. **Monolithic UI Controller**:
-   - [MainWindow.xaml.cs](MainWindow.xaml.cs) acts as a central coordinator combining UI interactions, 2D canvas overlay drawing, 3D camera transforms, and background workflow dispatching.
+   - [Views/MainWindow.xaml.cs](../Views/MainWindow.xaml.cs) acts as a central coordinator combining UI interactions, 2D canvas overlay drawing, 3D camera transforms, and background workflow dispatching.
    - *Impact*: High regression risk when modifying unrelated features.
    - *Recommendation*: Incrementally extract domain responsibilities (such as export coordination and 2D overlay rendering) into focused services.
 2. **In-Memory Elevation Buffer Footprint**:
@@ -257,5 +259,5 @@ The following conditions are verified design guarantees that must be maintained:
 When extending or cleaning the codebase:
 - **Avoid Wholesale Rewrites**: Do not attempt a full rewrite or force an MVVM framework into the project. The code-behind + static service pattern is established and functional.
 - **Isolate Computational Logic**: Place all new mathematical, GIS, or file I/O operations into `Services/` as pure static or injectable methods that do not depend on WPF UI controls.
-- **Extract Responsibilities Incrementally**: When modifying [MainWindow.xaml.cs](MainWindow.xaml.cs), look for opportunities to extract cohesive helper classes (e.g., `ExportCoordinator`, `ViewportCameraController`) with clear inputs and outputs.
+- **Extract Responsibilities Incrementally**: When modifying [Views/MainWindow.xaml.cs](../Views/MainWindow.xaml.cs), look for opportunities to extract cohesive helper classes (e.g., `ExportCoordinator`, `ViewportCameraController`) with clear inputs and outputs.
 - **Verify Invariants**: Any architectural refactoring must be accompanied by build verification (`dotnet build -c Release`) and regression testing of tile loading, void filling, and export.

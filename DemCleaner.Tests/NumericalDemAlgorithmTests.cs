@@ -409,4 +409,50 @@ public class NumericalDemAlgorithmTests
         string resultGeneric = TiffDemReader.DeriveLocationName(generic);
         Assert.AreEqual("CraterLake", resultGeneric);
     }
+
+    [TestMethod]
+    public void App_StartupUri_PointsToExistingViewsMainWindow()
+    {
+        var app = new DemCleaner.App();
+        app.InitializeComponent();
+        Assert.IsNotNull(app.StartupUri);
+        Assert.AreEqual("Views/MainWindow.xaml", app.StartupUri.OriginalString);
+    }
+
+    [TestMethod]
+    public void ComputeExportAreaStats_ExactCalculation_CapturesPeaksBetweenStrides()
+    {
+        int dim = 1024;
+        float[] data = new float[dim * dim];
+        Array.Fill(data, 100f);
+
+        // Place an isolated sharp peak at (1, 1), which sits between the 2-pixel stride
+        data[1 * dim + 1] = 999f;
+        // Place an isolated valley at (3, 3)
+        data[3 * dim + 3] = -50f;
+
+        var tile = new DemTile
+        {
+            FilePath = "test_stride.tif",
+            Width = dim,
+            Height = dim,
+            GridRow = 0,
+            GridCol = 0,
+            RawData = data,
+            BaseFilledData = data,
+            FilledData = data
+        };
+
+        var mosaic = DemProcessor.BuildMosaicDescriptor(new[] { tile }, fallbackElevation: 0f);
+
+        // Strided interactive calculation skips odd pixels
+        var stridedStats = DemProcessor.ComputeExportAreaStats(mosaic, 0.0, 0.0, 1.0, 1.0, exactCalculation: false);
+        Assert.AreEqual(100f, stridedStats.MaxElevation, 1e-4f, "Strided calculation should miss off-stride peak");
+        Assert.AreEqual(100f, stridedStats.MinElevation, 1e-4f, "Strided calculation should miss off-stride valley");
+
+        // Exact calculation scans all pixels without skipping
+        var exactStats = DemProcessor.ComputeExportAreaStats(mosaic, 0.0, 0.0, 1.0, 1.0, exactCalculation: true);
+        Assert.AreEqual(999f, exactStats.MaxElevation, 1e-4f, "Exact calculation must capture the true peak");
+        Assert.AreEqual(-50f, exactStats.MinElevation, 1e-4f, "Exact calculation must capture the true valley");
+    }
 }

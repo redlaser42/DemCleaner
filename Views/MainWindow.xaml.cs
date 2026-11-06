@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -32,8 +33,14 @@ public partial class MainWindow : Window
     private bool _isBusy = false;
     private bool _isSyncingSelectedTileCombo = false;
     private bool _isSyncingExportResolutionBoxes = false;
+    private bool _isSyncing3DResolutionCombo = false;
     private bool _matchNativeExportResolution = true;
     private bool _isAuto3DZScale = true;
+    private int _appliedSeamSmoothingSteps = 0;
+    private int _appliedInterpolationIterations = 10;
+    private bool _hasCustomExportFolder = false;
+    private bool _customAreaIsSquareDrag = false;
+    private int _humanScaleSyncMode = 0; // 0: Auto (3D when 3D view active, else Export), 1: Export Res (m/px), 2: 3D Viewport Res (m/quad)
 
     // Interactive Viewport Export Area state (normalized [0..1] across the stitched mosaic)
     private double _exportNormX0 = 0.0;
@@ -51,6 +58,9 @@ public partial class MainWindow : Window
     private bool _isMouseDownOnMosaic = false;
     private bool _isDraggingExportArea = false;
     private Point _mosaicDragStartPt;
+    private bool _isDraggingCorner = false;
+    private int _draggedCornerIndex = -1;
+    private Point _cornerAnchorPt;
     private bool _isDraggingGizmo = false;
     private Point _mosaicPanStartPt;
     private double _mosaicPanStartHOffset;
@@ -74,6 +84,53 @@ public partial class MainWindow : Window
     private bool _isCamUpdatePending = false;
     private bool _isSettingsOpen = false;
     private DispatcherTimer? _waterSliderDebounceTimer;
+
+    // Dynamic Human Scale Reference State
+    private double _humanScaleHillFactor = 1.0;
+
+    // 3D Viewport Terrain Scale Grid State
+    private double _lastGridIncrementMeters = 0.0;
+    private Heightmap3DAssets? _current3DAssets;
+    private double _last3DNormX0 = -1.0;
+    private double _last3DNormY0 = -1.0;
+    private double _last3DNormX1 = -1.0;
+    private double _last3DNormY1 = -1.0;
+    private int _last3DMeshRes = -1;
+    private bool _last3DShowProcessed = true;
+    private float _last3DNormMin = float.NaN;
+    private float _last3DNormMax = float.NaN;
+    private static readonly BitmapSource _scaleGridTileBitmap = CreateScaleGridTileBitmap();
+    private static readonly double[] ScaleGridIncrements =
+    {
+        1.0, 2.0, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0,
+        1000.0, 2000.0, 2500.0, 5000.0, 10000.0, 20000.0, 25000.0, 50000.0, 100000.0, 250000.0, 500000.0
+    };
+
+    private static BitmapSource CreateScaleGridTileBitmap()
+    {
+        int dim = 256;
+        var wb = new WriteableBitmap(dim, dim, 96, 96, PixelFormats.Bgra32, null);
+        uint[] px = new uint[dim * dim];
+        uint cyan = 0xD800E5FF;
+        uint dark = 0x60000000;
+        for (int y = 0; y < dim; y++)
+        {
+            for (int x = 0; x < dim; x++)
+            {
+                if (x < 2 || x >= dim - 2 || y < 2 || y >= dim - 2)
+                {
+                    px[y * dim + x] = cyan;
+                }
+                else if (x == 2 || x == dim - 3 || y == 2 || y == dim - 3)
+                {
+                    px[y * dim + x] = dark;
+                }
+            }
+        }
+        wb.WritePixels(new Int32Rect(0, 0, dim, dim), px, dim * 4, 0);
+        wb.Freeze();
+        return wb;
+    }
 
     private bool IsCustomExportAreaActive =>
         Math.Abs(_exportNormX0) > 1e-4 ||
@@ -160,11 +217,16 @@ public partial class MainWindow : Window
             BdrInterpolatedNote.Visibility = settings.FillMethod == 3 ? Visibility.Visible : Visibility.Collapsed;
         }
         SldIterations.Value = Math.Clamp(settings.InterpolationPasses, 1, 500);
+        _appliedInterpolationIterations = (int)Math.Round(SldIterations.Value);
+        if (TxtIterationsLabel != null)
+        {
+            TxtIterationsLabel.Text = $"{_appliedInterpolationIterations}";
+        }
 
         ChkUseGlobalForConstantFill.IsChecked = settings.UseGlobalForConstantFill;
         ChkEnablePerTileFillOverride.IsChecked = settings.EnablePerTileFillOverride;
         ColTileFillOverride.Visibility = settings.EnablePerTileFillOverride ? Visibility.Visible : Visibility.Collapsed;
-        PnlSelectedTileOverride.Visibility = settings.EnablePerTileFillOverride ? Visibility.Visible : Visibility.Collapsed;
+        PnlSelectedTileOverride.Visibility = (settings.EnablePerTileFillOverride && RbView3D?.IsChecked != true) ? Visibility.Visible : Visibility.Collapsed;
 
         int smoothingSteps = Math.Clamp(settings.SeamSmoothingSteps, 0, 20);
         SldSeamSmoothingSteps.Value = smoothingSteps;
@@ -191,6 +253,7 @@ public partial class MainWindow : Window
         {
             TxtNewExportHeight.Text = settings.ExportHeight;
         }
+        _matchNativeExportResolution = settings.MatchNativeExportResolution;
         ChkLockExportAspectRatio.IsChecked = settings.LockExportAspectRatio;
 
         if (settings.ExportFileFormatIndex >= 0 && settings.ExportFileFormatIndex < CmbExportFileFormat.Items.Count)
@@ -198,9 +261,14 @@ public partial class MainWindow : Window
             CmbExportFileFormat.SelectedIndex = settings.ExportFileFormatIndex;
         }
 
+        string defaultExportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ExportedPngs");
         if (!string.IsNullOrWhiteSpace(settings.ExportFolder))
         {
             TxtExportFolder.Text = settings.ExportFolder;
+            _hasCustomExportFolder = !string.Equals(
+                Path.GetFullPath(settings.ExportFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(defaultExportDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
         }
 
         ChkExportStandardXyNaming.IsChecked = settings.ExportStandardXyNaming;
@@ -233,6 +301,7 @@ public partial class MainWindow : Window
             ResolutionPresetSetIndex = CmbExportResolutionPresetSet.SelectedIndex,
             ExportWidth = TxtNewExportWidth.Text,
             ExportHeight = TxtNewExportHeight.Text,
+            MatchNativeExportResolution = _matchNativeExportResolution,
             LockExportAspectRatio = ChkLockExportAspectRatio.IsChecked == true,
             ExportFileFormatIndex = CmbExportFileFormat.SelectedIndex,
             ExportFolder = TxtExportFolder.Text,
@@ -395,15 +464,46 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ViewportCanvasArea_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_tiles.Count == 0 && !_isBusy)
+        {
+            BtnImportFiles_Click(sender, e);
+        }
+    }
+
+    private void PnlEmptyState_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_tiles.Count == 0 && !_isBusy)
+        {
+            BtnImportFiles_Click(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private void Invalidate3DMeshCache()
+    {
+        _current3DAssets = null;
+        _last3DMeshRes = -1;
+        _last3DNormX0 = -1.0;
+        _last3DNormY0 = -1.0;
+        _last3DNormX1 = -1.0;
+        _last3DNormY1 = -1.0;
+        _last3DNormMin = float.NaN;
+        _last3DNormMax = float.NaN;
+    }
+
     private void BtnClear_Click(object sender, RoutedEventArgs e)
     {
         if (_isBusy) return;
         _tiles.Clear();
+        Invalidate3DMeshCache();
         RefreshTileIndices();
         _exportNormX0 = 0.0;
         _exportNormY0 = 0.0;
         _exportNormX1 = 1.0;
         _exportNormY1 = 1.0;
+        _customAreaIsSquareDrag = false;
         _isAuto3DZScale = true;
         UpdateGlobalStatsDisplay();
         RebuildMosaicGrid();
@@ -421,6 +521,13 @@ public partial class MainWindow : Window
 
             if (_tiles.Count == 0)
             {
+                Invalidate3DMeshCache();
+                _exportNormX0 = 0.0;
+                _exportNormY0 = 0.0;
+                _exportNormX1 = 1.0;
+                _exportNormY1 = 1.0;
+                _customAreaIsSquareDrag = false;
+                _isAuto3DZScale = true;
                 UpdateGlobalStatsDisplay();
                 RebuildMosaicGrid();
                 UpdateInspectorView();
@@ -440,7 +547,7 @@ public partial class MainWindow : Window
 
         bool enabled = ChkEnablePerTileFillOverride.IsChecked == true;
         ColTileFillOverride.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
-        PnlSelectedTileOverride.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        PnlSelectedTileOverride.Visibility = (enabled && RbView3D?.IsChecked != true) ? Visibility.Visible : Visibility.Collapsed;
 
         if (!enabled && _tiles.Any(t => t.FillOverride != TileFillModeOverride.UseGlobalDefault))
         {
@@ -509,7 +616,7 @@ public partial class MainWindow : Window
 
     private async Task ProcessSingleTileOverrideAsync(DemTile tile)
     {
-        _cts?.Dispose();
+        _cts?.Cancel();
         _cts = new CancellationTokenSource();
         CancellationToken token = _cts.Token;
 
@@ -533,7 +640,10 @@ public partial class MainWindow : Window
                 }
             }, token);
 
+            _appliedSeamSmoothingSteps = options.SeamSmoothingSteps;
             RebuildMosaicGrid();
+            UpdateExportAreaMetricsAndUi(exactCalculation: true);
+            UpdateGlobalStatsDisplay();
             UpdateInspectorView();
             if (RbView3D.IsChecked == true)
             {
@@ -591,7 +701,7 @@ public partial class MainWindow : Window
 
     private async Task LoadAndProcessFilesAsync(IEnumerable<string> filePaths, bool append)
     {
-        _cts?.Dispose();
+        _cts?.Cancel();
         _cts = new CancellationTokenSource();
         CancellationToken token = _cts.Token;
 
@@ -601,11 +711,13 @@ public partial class MainWindow : Window
             if (!append)
             {
                 _tiles.Clear();
+                Invalidate3DMeshCache();
                 RefreshTileIndices();
                 _exportNormX0 = 0.0;
                 _exportNormY0 = 0.0;
                 _exportNormX1 = 1.0;
                 _exportNormY1 = 1.0;
+                _customAreaIsSquareDrag = false;
             }
 
             var existingPaths = _tiles.Select(t => t.FilePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -633,7 +745,7 @@ public partial class MainWindow : Window
             }
 
             // If designated export folder hasn't been customized yet, default to a subfolder next to the first loaded tile
-            if (_tiles.Count > 0 && string.IsNullOrWhiteSpace(TxtExportFolder.Text))
+            if (_tiles.Count > 0 && (!_hasCustomExportFolder || string.IsNullOrWhiteSpace(TxtExportFolder.Text)))
             {
                 string? firstDir = Path.GetDirectoryName(_tiles[0].FilePath);
                 if (!string.IsNullOrEmpty(firstDir))
@@ -678,7 +790,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _cts?.Dispose();
+        _cts?.Cancel();
         _cts = new CancellationTokenSource();
 
         try
@@ -761,8 +873,19 @@ public partial class MainWindow : Window
             }
         }, token);
 
+        _appliedSeamSmoothingSteps = options.SeamSmoothingSteps;
+        _appliedInterpolationIterations = options.InterpolationIterations;
+        if (TxtIterationsLabel != null)
+        {
+            TxtIterationsLabel.Text = $"{_appliedInterpolationIterations}";
+        }
+        if (TxtSeamSmoothingStepsLabel != null)
+        {
+            TxtSeamSmoothingStepsLabel.Text = options.SeamSmoothingSteps <= 0 ? "0 steps (Off)" : $"{options.SeamSmoothingSteps} step{(options.SeamSmoothingSteps == 1 ? "" : "s")}";
+        }
+
         RebuildMosaicGrid();
-        UpdateExportAreaMetricsAndUi();
+        UpdateExportAreaMetricsAndUi(exactCalculation: true);
         UpdateInspectorView();
         if (RbView3D.IsChecked == true)
         {
@@ -781,7 +904,7 @@ public partial class MainWindow : Window
         return (_globalMin, _globalMax);
     }
 
-    private void UpdateExportAreaMetricsAndUi()
+    private void UpdateExportAreaMetricsAndUi(bool exactCalculation = false)
     {
         if (_tiles.Count == 0)
         {
@@ -799,13 +922,12 @@ public partial class MainWindow : Window
             if (Btn3DReturnToGlobal != null)
                 Btn3DReturnToGlobal.Visibility = Visibility.Collapsed;
             UpdateNewExportResolutionSummary();
-            Update2DScaleBar();
             Update3DScaleBar();
             return;
         }
 
         var mosaic = DemProcessor.BuildMosaicDescriptor(_tiles, _globalMin);
-        _exportAreaStats = DemProcessor.ComputeExportAreaStats(mosaic, _exportNormX0, _exportNormY0, _exportNormX1, _exportNormY1);
+        _exportAreaStats = DemProcessor.ComputeExportAreaStats(mosaic, _exportNormX0, _exportNormY0, _exportNormX1, _exportNormY1, exactCalculation);
 
         bool isCustom = IsCustomExportAreaActive;
 
@@ -822,38 +944,10 @@ public partial class MainWindow : Window
         if (Btn3DReturnToGlobal != null)
             Btn3DReturnToGlobal.Visibility = isCustom ? Visibility.Visible : Visibility.Collapsed;
 
-        if (isCustom)
+        if (isCustom && _customAreaIsSquareDrag)
         {
             int sidePx = Math.Min(_exportAreaStats.PixelWidth, _exportAreaStats.PixelHeight);
             _exportAreaStats = _exportAreaStats with { PixelWidth = sidePx, PixelHeight = sidePx };
-        }
-
-        // Update the header GRID SIZE badge dynamically for either the full grid or the custom defined area
-        if (TxtGlobalGridWidth != null && TxtGridSizeLabel != null)
-        {
-            double metersPerPixel = GetMetersPerPixelFromUi();
-            TxtGridSizeLabel.Text = isCustom
-                ? $"AREA SIZE ({metersPerPixel:0.##}m/px)"
-                : $"GRID SIZE ({metersPerPixel:0.##}m/px)";
-
-            double physicalWidthMeters = _exportAreaStats.PixelWidth * metersPerPixel;
-            double physicalHeightMeters = _exportAreaStats.PixelHeight * metersPerPixel;
-            TxtGlobalGridWidth.Text = $"{physicalWidthMeters:N0}m × {physicalHeightMeters:N0}m";
-            if (isCustom)
-            {
-                var (fileW, fileH) = GetNewExportFileResolutionFromUi();
-                var (gridR, gridC) = GetNewExportGridDimensionsFromUi();
-                int totalExportPxW = fileW * gridC;
-                double zonePhysicalMetersW = _exportAreaStats.PixelWidth * metersPerPixel;
-                double effectiveExportMpp = totalExportPxW > 0 ? (zonePhysicalMetersW / totalExportPxW) : metersPerPixel;
-                if (TxtMetersPerPixelLabel != null) TxtMetersPerPixelLabel.Text = "EXPORT AREA METERS/PX";
-                if (TxtSourceMetersPerPixel != null) TxtSourceMetersPerPixel.Text = $"{effectiveExportMpp:0.##} m/px (Src: {metersPerPixel:0.##})";
-            }
-            else
-            {
-                if (TxtMetersPerPixelLabel != null) TxtMetersPerPixelLabel.Text = "SOURCE DATA METERS/PX";
-                if (TxtSourceMetersPerPixel != null) TxtSourceMetersPerPixel.Text = $"{metersPerPixel:0.##} m/px";
-            }
         }
 
         if (_matchNativeExportResolution)
@@ -865,21 +959,49 @@ public partial class MainWindow : Window
             AdjustExportHeightForLockedAspectRatio();
         }
 
+        // Update the header GROUND SPAN & SCALE badge dynamically for either the full mosaic or the custom defined area
+        if (TxtGlobalGridWidth != null && TxtGridSizeLabel != null)
+        {
+            double metersPerPixel = GetMetersPerPixelFromUi();
+            TxtGridSizeLabel.Text = isCustom ? "AREA SPAN:" : "SPAN:";
+
+            double physicalWidthMeters = _exportAreaStats.PixelWidth * metersPerPixel;
+            double physicalHeightMeters = _exportAreaStats.PixelHeight * metersPerPixel;
+            TxtGlobalGridWidth.Text = $"{physicalWidthMeters:N0}m × {physicalHeightMeters:N0}m";
+
+            var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+            var (gridR, gridC) = GetNewExportGridDimensionsFromUi();
+            long totalExportPxW = (long)fileW * gridC;
+            double effectiveExportMpp = totalExportPxW > 0 ? (physicalWidthMeters / totalExportPxW) : metersPerPixel;
+
+            if (TxtMetersPerPixelLabel != null) TxtMetersPerPixelLabel.Text = "SCALE:";
+            if (TxtSourceMetersPerPixel != null)
+            {
+                if (Math.Abs(effectiveExportMpp - metersPerPixel) < 0.01)
+                {
+                    TxtSourceMetersPerPixel.Text = $"{metersPerPixel:0.##} m/px (1:1)";
+                }
+                else
+                {
+                    TxtSourceMetersPerPixel.Text = $"Exp {effectiveExportMpp:0.##} (Src {metersPerPixel:0.##}) m/px";
+                }
+            }
+        }
+
         if (_isAuto3DZScale)
         {
             UpdateAuto3DZScaleFromActiveZone();
         }
 
         UpdateNewExportResolutionSummary();
-        Update2DScaleBar();
         Update3DScaleBar();
     }
 
-    private void UpdateGlobalStatsDisplay()
+    private void UpdateGlobalStatsDisplay(bool exactCalculation = false)
     {
         TxtTileCount.Text = _tiles.Count.ToString();
         double metersPerPixel = GetMetersPerPixelFromUi();
-        TxtGridSizeLabel.Text = $"GRID SIZE ({metersPerPixel:0.##}m/px)";
+        TxtGridSizeLabel.Text = "SPAN:";
 
         if (_tiles.Count == 0)
         {
@@ -887,28 +1009,27 @@ public partial class MainWindow : Window
             TxtGlobalMax.Text = "—";
             TxtGlobalHeightRange.Text = "—";
             TxtGlobalGridWidth.Text = "—";
+            if (TxtSourceMetersPerPixel != null) TxtSourceMetersPerPixel.Text = "—";
             TxtTotalVoids.Text = "0";
             TxtGridCenterCoords.Text = "No geolocated tiles loaded";
             if (BtnOpenInMap != null) BtnOpenInMap.IsEnabled = false;
             PnlEmptyState.Visibility = Visibility.Visible;
             SvGridMosaic.Visibility = Visibility.Collapsed;
-            if (Bdr2DScaleBar != null)
-                Bdr2DScaleBar.Visibility = Visibility.Collapsed;
             GrdTileInspector.Visibility = Visibility.Collapsed;
             if (Grd3DVisualizer != null)
                 Grd3DVisualizer.Visibility = Visibility.Collapsed;
             if (BtnResetExportAreaToolbar != null)
                 BtnResetExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             if (BtnCenterExportAreaToolbar != null) BtnCenterExportAreaToolbar.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-            if (BdrGridLeftStatsOverlay != null)
-                BdrGridLeftStatsOverlay.Visibility = RbViewGrid?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             if (PnlViewport3DBar != null)
                 PnlViewport3DBar.Visibility = RbView3D?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-            UpdateExportAreaMetricsAndUi();
+            if (PnlSelectedTileOverride != null)
+                PnlSelectedTileOverride.Visibility = (ChkEnablePerTileFillOverride?.IsChecked == true && RbView3D?.IsChecked != true) ? Visibility.Visible : Visibility.Collapsed;
+            UpdateExportAreaMetricsAndUi(exactCalculation);
         }
         else
         {
-            UpdateExportAreaMetricsAndUi();
+            UpdateExportAreaMetricsAndUi(exactCalculation);
             var (dispMin, dispMax) = GetEffectiveNormalizationRange();
             float heightRange = Math.Max(0f, dispMax - dispMin);
             TxtGlobalMin.Text = $"{dispMin:F2}m";
@@ -937,10 +1058,6 @@ public partial class MainWindow : Window
             bool show3D = RbView3D?.IsChecked == true;
 
             SvGridMosaic.Visibility = showGrid ? Visibility.Visible : Visibility.Collapsed;
-            if (Bdr2DScaleBar != null)
-                Bdr2DScaleBar.Visibility = showGrid ? Visibility.Visible : Visibility.Collapsed;
-            if (BdrGridLeftStatsOverlay != null)
-                BdrGridLeftStatsOverlay.Visibility = (showGrid || showInspector) ? Visibility.Visible : Visibility.Collapsed;
             GrdTileInspector.Visibility = showInspector ? Visibility.Visible : Visibility.Collapsed;
             if (Grd3DVisualizer != null)
                 Grd3DVisualizer.Visibility = show3D ? Visibility.Visible : Visibility.Collapsed;
@@ -950,13 +1067,12 @@ public partial class MainWindow : Window
             if (BtnCenterExportAreaToolbar != null) BtnCenterExportAreaToolbar.Visibility = showGrid ? Visibility.Visible : Visibility.Collapsed;
             if (PnlViewport3DBar != null)
                 PnlViewport3DBar.Visibility = show3D ? Visibility.Visible : Visibility.Collapsed;
+            if (PnlSelectedTileOverride != null)
+                PnlSelectedTileOverride.Visibility = (ChkEnablePerTileFillOverride?.IsChecked == true && !show3D) ? Visibility.Visible : Visibility.Collapsed;
 
-            Update2DScaleBar();
             Update3DScaleBar();
         }
     }
-
-    private double _metersPerPixel = 1.0;
 
     private double GetMetersPerPixelFromUi()
     {
@@ -964,9 +1080,32 @@ public partial class MainWindow : Window
         if (tileWithScale != null)
         {
             double sx = tileWithScale.PixelScaleX!.Value;
-            return sx < 0.01 ? sx * 111320.0 : sx;
+            if (sx < 0.01)
+            {
+                double cosLat = 1.0;
+                if (TiffDemReader.TryGetGridCenterLatLon(_tiles, out double centerLat, out _, out _))
+                {
+                    cosLat = Math.Clamp(Math.Cos(centerLat * Math.PI / 180.0), 0.05, 1.0);
+                }
+                double sy = tileWithScale.PixelScaleY.HasValue && tileWithScale.PixelScaleY.Value > 0
+                    ? tileWithScale.PixelScaleY.Value
+                    : sx;
+                double degToMetersX = sx * 111320.0 * cosLat;
+                double degToMetersY = sy * 111320.0;
+                return (degToMetersX + degToMetersY) * 0.5;
+            }
+            return sx;
         }
-        return _metersPerPixel > 0 ? _metersPerPixel : 1.0;
+
+        var usgsTile = _tiles.FirstOrDefault(t =>
+            (t.GeoOriginX.HasValue && t.GeoOriginY.HasValue) ||
+            (t.ParsedFileX.HasValue && t.ParsedFileY.HasValue && t.UtmZone.HasValue));
+        if (usgsTile != null && usgsTile.Width > 0)
+        {
+            return 10000.0 / usgsTile.Width;
+        }
+
+        return 1.0;
     }
 
     private void ChkExportStandardXyNaming_Changed(object sender, RoutedEventArgs e)
@@ -1126,6 +1265,7 @@ public partial class MainWindow : Window
                         CornerRadius = new CornerRadius(4),
                         Padding = new Thickness(5, 2, 5, 2),
                         Margin = new Thickness(5),
+                        MaxWidth = Math.Max(42.0, _colDispWidths[c] - 12.0),
                         HorizontalAlignment = HorizontalAlignment.Left,
                         VerticalAlignment = VerticalAlignment.Top,
                         IsHitTestVisible = false
@@ -1136,12 +1276,13 @@ public partial class MainWindow : Window
                         Text = $"{tile.FileName}{fillBadge}",
                         Foreground = Brushes.White,
                         FontSize = 9.5,
-                        FontWeight = FontWeights.SemiBold
+                        FontWeight = FontWeights.SemiBold,
+                        TextTrimming = TextTrimming.CharacterEllipsis
                     };
                     labelBorder.Child = labelText;
                     cellGrid.Children.Add(labelBorder);
 
-                    // Bottom-Right Corner: 0x0y, 1x0y Tile Coordinate Slot Badge
+                    // Bottom-Right Corner: x0_y0, x1_y0 Tile Coordinate Slot Badge
                     var slotBadge = new Border
                     {
                         Background = new SolidColorBrush(Color.FromArgb(215, 12, 18, 14)),
@@ -1153,10 +1294,10 @@ public partial class MainWindow : Window
                         HorizontalAlignment = HorizontalAlignment.Right,
                         VerticalAlignment = VerticalAlignment.Bottom,
                         IsHitTestVisible = false,
-                        ToolTip = $"Tile Grid Coordinates: {c}x{r}y (Col {c}, Row {r})",
+                        ToolTip = $"Tile Grid Coordinates: x{c}_y{r} (Col {c}, Row {r})",
                         Child = new TextBlock
                         {
-                            Text = $"{c}x{r}y",
+                            Text = $"x{c}_y{r}",
                             Foreground = accentPrimaryBrush,
                             FontFamily = new FontFamily("Consolas, monospace"),
                             FontSize = 10,
@@ -1235,7 +1376,6 @@ public partial class MainWindow : Window
         GrdMosaicWithHeaders.Children.Add(cornerBox);
 
         RenderExportAreaOverlay();
-        Update2DScaleBar();
     }
 
     private FrameworkElement BuildLeftGraticule(int rows, MosaicDescriptor mosaic, double mpp)
@@ -1376,18 +1516,76 @@ public partial class MainWindow : Window
             Height = 34.0,
             Background = (Brush)Resources["ThemeBgWell"],
             BorderBrush = (Brush)Resources["ThemeBorderCard"],
-            BorderThickness = new Thickness(0, 1.2, 1.2, 0),
-            Child = new TextBlock
-            {
-                Text = "px â€¢ m",
-                Foreground = (Brush)Resources["ThemeTextMuted"],
-                FontSize = 8.0,
-                FontWeight = FontWeights.Bold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            }
+            BorderThickness = new Thickness(0, 1.2, 1.2, 0)
         };
     }
+    private int GetCornerUnderPoint(Point pt)
+    {
+        if (!IsCustomExportAreaActive || _tiles.Count == 0) return -1;
+        double w = _mosaicCanvasWidth;
+        double h = _mosaicCanvasHeight;
+        if (w <= 1.0 || h <= 1.0) return -1;
+
+        double rx0 = _exportNormX0 * w;
+        double ry0 = _exportNormY0 * h;
+        double rx1 = _exportNormX1 * w;
+        double ry1 = _exportNormY1 * h;
+
+        Point[] corners =
+        {
+            new Point(rx0, ry0), // 0: Top-Left (NW)
+            new Point(rx1, ry0), // 1: Top-Right (NE)
+            new Point(rx1, ry1), // 2: Bottom-Right (SE)
+            new Point(rx0, ry1)  // 3: Bottom-Left (SW)
+        };
+
+        const double hitRadiusSq = 14.0 * 14.0;
+        int bestIdx = -1;
+        double bestDistSq = hitRadiusSq;
+
+        for (int i = 0; i < 4; i++)
+        {
+            double dx = pt.X - corners[i].X;
+            double dy = pt.Y - corners[i].Y;
+            double distSq = dx * dx + dy * dy;
+            if (distSq <= bestDistSq)
+            {
+                bestDistSq = distSq;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
+    private Point GetOppositeAnchorPoint(int cornerIndex)
+    {
+        double w = _mosaicCanvasWidth;
+        double h = _mosaicCanvasHeight;
+        double rx0 = _exportNormX0 * w;
+        double ry0 = _exportNormY0 * h;
+        double rx1 = _exportNormX1 * w;
+        double ry1 = _exportNormY1 * h;
+
+        return cornerIndex switch
+        {
+            0 => new Point(rx1, ry1), // NW dragged -> SE anchor
+            1 => new Point(rx0, ry1), // NE dragged -> SW anchor
+            2 => new Point(rx0, ry0), // SE dragged -> NW anchor
+            3 => new Point(rx1, ry0), // SW dragged -> NE anchor
+            _ => new Point(rx0, ry0)
+        };
+    }
+
+    private static Cursor GetCornerCursor(int cornerIndex)
+    {
+        return cornerIndex switch
+        {
+            0 or 2 => Cursors.SizeNWSE,
+            1 or 3 => Cursors.SizeNESW,
+            _ => Cursors.Cross
+        };
+    }
+
     private void MosaicOverlayCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (_mosaicOverlayCanvas == null || _tiles.Count == 0) return;
@@ -1409,8 +1607,24 @@ public partial class MainWindow : Window
         _mosaicDragStartPt = downPt;
         _isMouseDownOnMosaic = true;
         _isDraggingExportArea = false;
+        _isDraggingCorner = false;
+        _draggedCornerIndex = -1;
 
-        // Check if mouse clicked on the Transform Control Gizmo of an active custom export zone
+        // 1. Check if mouse clicked on one of the four interactive corner resize handles
+        int corner = GetCornerUnderPoint(downPt);
+        if (corner >= 0)
+        {
+            _isDraggingCorner = true;
+            _draggedCornerIndex = corner;
+            _cornerAnchorPt = GetOppositeAnchorPoint(corner);
+            _mosaicOverlayCanvas.Cursor = GetCornerCursor(corner);
+            _mosaicOverlayCanvas.CaptureMouse();
+            RenderExportAreaOverlay();
+            e.Handled = true;
+            return;
+        }
+
+        // 2. Check if mouse clicked on the Transform Control Gizmo of an active custom export zone
         if (IsPointOverGizmo(downPt))
         {
             _isDraggingGizmo = true;
@@ -1439,10 +1653,36 @@ public partial class MainWindow : Window
         curPt.X = Math.Clamp(curPt.X, 0.0, _mosaicCanvasWidth);
         curPt.Y = Math.Clamp(curPt.Y, 0.0, _mosaicCanvasHeight);
 
-        // When mouse button is not held down, update hover cursor based on proximity to the transform gizmo
+        // When mouse button is not held down, update hover cursor based on proximity to corners or transform gizmo
         if (!_isMouseDownOnMosaic)
         {
-            _mosaicOverlayCanvas.Cursor = IsPointOverGizmo(curPt) ? Cursors.SizeAll : Cursors.Cross;
+            int hoverCorner = GetCornerUnderPoint(curPt);
+            if (hoverCorner >= 0)
+            {
+                _mosaicOverlayCanvas.Cursor = GetCornerCursor(hoverCorner);
+            }
+            else if (IsPointOverGizmo(curPt))
+            {
+                _mosaicOverlayCanvas.Cursor = Cursors.SizeAll;
+            }
+            else
+            {
+                _mosaicOverlayCanvas.Cursor = Cursors.Cross;
+            }
+            return;
+        }
+
+        // Handle corner-anchored drag resize
+        if (_isDraggingCorner)
+        {
+            ApplyDragPointsToExportArea(_cornerAnchorPt, curPt);
+            UpdateExportAreaMetricsAndUi();
+            RenderExportAreaOverlay();
+
+            double mpp = GetMetersPerPixelFromUi();
+            double wM = _exportAreaStats.PixelWidth * mpp;
+            double hM = _exportAreaStats.PixelHeight * mpp;
+            TxtStatusBar.Text = $"Resizing Export Zone: {_exportAreaStats.PixelWidth} \u00d7 {_exportAreaStats.PixelHeight} px ({wM:N0}m \u00d7 {hM:N0}m) \u2022 Scale: {mpp:0.##} m/px \u2022 Elev [{_exportAreaStats.MinElevation:F1}m .. {_exportAreaStats.MaxElevation:F1}m]";
             return;
         }
 
@@ -1505,18 +1745,37 @@ public partial class MainWindow : Window
         releasePt.X = Math.Clamp(releasePt.X, 0.0, _mosaicCanvasWidth);
         releasePt.Y = Math.Clamp(releasePt.Y, 0.0, _mosaicCanvasHeight);
 
+        bool wasDraggingCorner = _isDraggingCorner;
         bool wasDraggingExportArea = _isDraggingExportArea;
         bool wasDraggingGizmo = _isDraggingGizmo;
 
         _isMouseDownOnMosaic = false;
+        _isDraggingCorner = false;
+        _draggedCornerIndex = -1;
         _isDraggingExportArea = false;
         _isDraggingGizmo = false;
         _mosaicOverlayCanvas.ReleaseMouseCapture();
 
-        if (wasDraggingGizmo)
+        if (wasDraggingCorner)
         {
             _isAuto3DZScale = true;
-            UpdateGlobalStatsDisplay();
+            ApplyDragPointsToExportArea(_cornerAnchorPt, releasePt);
+            UpdateGlobalStatsDisplay(exactCalculation: true);
+            RenderExportAreaOverlay();
+            TxtStatusBar.Text =
+                $"Resized Export Area: X={_exportAreaStats.PixelX}..{_exportAreaStats.PixelX + _exportAreaStats.PixelWidth} px, " +
+                $"Y={_exportAreaStats.PixelY}..{_exportAreaStats.PixelY + _exportAreaStats.PixelHeight} px " +
+                $"({_exportAreaStats.PixelWidth} \u00d7 {_exportAreaStats.PixelHeight} px) \u2022 Elev [{_exportAreaStats.MinElevation:F2}m .. {_exportAreaStats.MaxElevation:F2}m]";
+
+            if (RbView3D?.IsChecked == true && _tiles.Count > 0)
+            {
+                _ = Rebuild3DVisualizerAsync();
+            }
+        }
+        else if (wasDraggingGizmo)
+        {
+            _isAuto3DZScale = true;
+            UpdateGlobalStatsDisplay(exactCalculation: true);
             RenderExportAreaOverlay();
             TxtStatusBar.Text =
                 $"Repositioned Export Area: X={_exportAreaStats.PixelX}..{_exportAreaStats.PixelX + _exportAreaStats.PixelWidth} px, " +
@@ -1532,7 +1791,7 @@ public partial class MainWindow : Window
         {
             _isAuto3DZScale = true;
             ApplyDragPointsToExportArea(_mosaicDragStartPt, releasePt);
-            UpdateGlobalStatsDisplay();
+            UpdateGlobalStatsDisplay(exactCalculation: true);
             RenderExportAreaOverlay();
             TxtStatusBar.Text =
                 $"Redefined Export Area: X={_exportAreaStats.PixelX}..{_exportAreaStats.PixelX + _exportAreaStats.PixelWidth} px, " +
@@ -1549,7 +1808,14 @@ public partial class MainWindow : Window
             SelectTileAtCanvasPoint(releasePt);
         }
 
-        _mosaicOverlayCanvas.Cursor = IsPointOverGizmo(releasePt) ? Cursors.SizeAll : Cursors.Cross;
+        int endHoverCorner = GetCornerUnderPoint(releasePt);
+        if (endHoverCorner >= 0)
+            _mosaicOverlayCanvas.Cursor = GetCornerCursor(endHoverCorner);
+        else if (IsPointOverGizmo(releasePt))
+            _mosaicOverlayCanvas.Cursor = Cursors.SizeAll;
+        else
+            _mosaicOverlayCanvas.Cursor = Cursors.Cross;
+
         e.Handled = true;
     }
     /// <summary>
@@ -1631,6 +1897,7 @@ public partial class MainWindow : Window
         _exportNormY0 = ny0;
         _exportNormX1 = nx1;
         _exportNormY1 = ny1;
+        _customAreaIsSquareDrag = true;
     }
 
     private void SelectTileAtCanvasPoint(Point pt)
@@ -1761,28 +2028,32 @@ public partial class MainWindow : Window
             Canvas.SetTop(selRect, ry0);
             _mosaicOverlayCanvas.Children.Add(selRect);
 
-            // Corner Handles
-            const double handleSize = 8.0;
+            // Corner Handles (Interactive 4-corner resize anchors)
+            const double handleSize = 10.0;
             Point[] corners =
             {
-                new(rx0, ry0),
-                new(rx1 - handleSize, ry0),
-                new(rx0, ry1 - handleSize),
-                new(rx1 - handleSize, ry1)
+                new(rx0, ry0), // NW (0)
+                new(rx1, ry0), // NE (1)
+                new(rx1, ry1), // SE (2)
+                new(rx0, ry1)  // SW (3)
             };
-            foreach (var pt in corners)
+            for (int ci = 0; ci < 4; ci++)
             {
+                var pt = corners[ci];
+                bool isCornerActive = _isDraggingCorner && _draggedCornerIndex == ci;
                 var handle = new Rectangle
                 {
                     Width = handleSize,
                     Height = handleSize,
-                    Fill = outlineBrush,
-                    Stroke = Brushes.White,
-                    StrokeThickness = 1,
+                    Fill = isCornerActive ? new SolidColorBrush(Color.FromRgb(255, 215, 60)) : outlineBrush,
+                    Stroke = isCornerActive ? Brushes.Black : Brushes.White,
+                    StrokeThickness = 1.2,
+                    RadiusX = 1.5,
+                    RadiusY = 1.5,
                     IsHitTestVisible = false
                 };
-                Canvas.SetLeft(handle, Math.Clamp(pt.X, 0, Math.Max(0, w - handleSize)));
-                Canvas.SetTop(handle, Math.Clamp(pt.Y, 0, Math.Max(0, h - handleSize)));
+                Canvas.SetLeft(handle, Math.Clamp(pt.X - handleSize * 0.5, 0, Math.Max(0, w - handleSize)));
+                Canvas.SetTop(handle, Math.Clamp(pt.Y - handleSize * 0.5, 0, Math.Max(0, h - handleSize)));
                 _mosaicOverlayCanvas.Children.Add(handle);
             }
 
@@ -2144,6 +2415,16 @@ public partial class MainWindow : Window
         return (dx * dx + dy * dy) <= (hitRadius * hitRadius);
     }
 
+    private void SvGridMosaic_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_isInitializing || _tiles.Count == 0 || RbViewGrid?.IsChecked != true) return;
+        if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 4.0 ||
+            Math.Abs(e.NewSize.Height - e.PreviousSize.Height) > 4.0)
+        {
+            RebuildMosaicGrid();
+        }
+    }
+
     private void SvGridMosaic_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         e.Handled = true; // Prevent default vertical scroll / panning
@@ -2243,8 +2524,9 @@ public partial class MainWindow : Window
         _exportNormY0 = 0.0;
         _exportNormX1 = 1.0;
         _exportNormY1 = 1.0;
+        _customAreaIsSquareDrag = false;
         _isAuto3DZScale = true;
-        UpdateGlobalStatsDisplay();
+        UpdateGlobalStatsDisplay(exactCalculation: true);
         RenderExportAreaOverlay();
         if (RbView3D?.IsChecked == true && _tiles.Count > 0)
         {
@@ -2405,14 +2687,32 @@ public partial class MainWindow : Window
 
     private void SldIterations_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        // Users can click "Re-Calculate & Fill All Tiles" or change radio buttons to re-run
+        if (TxtIterationsLabel == null) return;
+        int passes = (int)Math.Round(SldIterations.Value);
+        if (!_isInitializing && _tiles.Count > 0 && passes != _appliedInterpolationIterations &&
+            (RbFillInterpolated?.IsChecked == true || _tiles.Any(t => t.FillOverride == TileFillModeOverride.Interpolated)))
+        {
+            TxtIterationsLabel.Text = $"{passes} (Pending)";
+        }
+        else
+        {
+            TxtIterationsLabel.Text = $"{passes}";
+        }
     }
 
     private void SldSeamSmoothingSteps_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (TxtSeamSmoothingStepsLabel == null) return;
         int steps = (int)Math.Round(SldSeamSmoothingSteps.Value);
-        TxtSeamSmoothingStepsLabel.Text = steps <= 0 ? "0 steps (Off)" : $"{steps} step{(steps == 1 ? "" : "s")}";
+        string stepText = steps <= 0 ? "0 steps (Off)" : $"{steps} step{(steps == 1 ? "" : "s")}";
+        if (steps != _appliedSeamSmoothingSteps && _tiles.Count > 1)
+        {
+            TxtSeamSmoothingStepsLabel.Text = $"{stepText} (Pending Apply)";
+        }
+        else
+        {
+            TxtSeamSmoothingStepsLabel.Text = stepText;
+        }
     }
 
     private async void BtnApplySeamSmoothing_Click(object sender, RoutedEventArgs e)
@@ -2425,7 +2725,7 @@ public partial class MainWindow : Window
     {
         if (_tiles.Count == 0) return;
 
-        _cts?.Dispose();
+        _cts?.Cancel();
         _cts = new CancellationTokenSource();
         CancellationToken token = _cts.Token;
 
@@ -2450,8 +2750,14 @@ public partial class MainWindow : Window
                 }
             }, token);
 
+            _appliedSeamSmoothingSteps = steps;
+            if (TxtSeamSmoothingStepsLabel != null)
+            {
+                TxtSeamSmoothingStepsLabel.Text = steps <= 0 ? "0 steps (Off)" : $"{steps} step{(steps == 1 ? "" : "s")}";
+            }
+
             RebuildMosaicGrid();
-            UpdateExportAreaMetricsAndUi();
+            UpdateGlobalStatsDisplay(exactCalculation: true);
             UpdateInspectorView();
             if (RbView3D?.IsChecked == true)
             {
@@ -2478,7 +2784,11 @@ public partial class MainWindow : Window
     {
         if (_isInitializing) return;
         UpdateGlobalStatsDisplay();
-        if (RbView3D?.IsChecked == true && _tiles.Count > 0)
+        if (RbViewGrid?.IsChecked == true && _tiles.Count > 0)
+        {
+            RebuildMosaicGrid();
+        }
+        else if (RbView3D?.IsChecked == true && _tiles.Count > 0)
         {
             await Rebuild3DVisualizerAsync();
         }
@@ -2505,7 +2815,12 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(new Action(async () =>
         {
-            UpdateGlobalStatsDisplay();
+            if (_tiles.Count > 1 && _appliedSeamSmoothingSteps > 0)
+            {
+                await ApplySeamSmoothingOnlyAsync();
+                return;
+            }
+            UpdateGlobalStatsDisplay(exactCalculation: true);
             RebuildMosaicGrid();
             if (RbView3D?.IsChecked == true && _tiles.Count > 0)
             {
@@ -2528,6 +2843,7 @@ public partial class MainWindow : Window
 
         if (dlg.ShowDialog() == true && !string.IsNullOrWhiteSpace(dlg.FolderName))
         {
+            _hasCustomExportFolder = true;
             TxtExportFolder.Text = dlg.FolderName;
             TxtStatusBar.Text = $"Designated export folder set to: {dlg.FolderName}";
         }
@@ -2639,6 +2955,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AdjustExportWidthForLockedAspectRatio()
+    {
+        if (_tiles.Count == 0 || TxtNewExportWidth == null || TxtNewExportHeight == null) return;
+        if (!int.TryParse(TxtNewExportHeight.Text, out int h) || h <= 0) return;
+
+        var (outRows, outCols) = GetNewExportGridDimensionsFromUi();
+        double tileSrcW = Math.Max(1.0, _exportAreaStats.PixelWidth / (double)outCols);
+        double tileSrcH = Math.Max(1.0, _exportAreaStats.PixelHeight / (double)outRows);
+        int w = Math.Max(1, (int)Math.Round(h * (tileSrcW / tileSrcH)));
+
+        _isSyncingExportResolutionBoxes = true;
+        try
+        {
+            TxtNewExportWidth.Text = w.ToString(CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _isSyncingExportResolutionBoxes = false;
+        }
+    }
+
     private static long ComputeGcd(long a, long b)
     {
         a = Math.Abs(a);
@@ -2709,16 +3046,31 @@ public partial class MainWindow : Window
         if (totalFiles == 1)
         {
             TxtNewExportResolutionSummary.Text =
-                $"Output: 1 Single File • {fileW} × {fileH} px • Export/Source Ratio: {ratioText}";
+                $"Output: 1 Single File • {fileW} × {fileH} px • Export/Source: {ratioText}";
         }
         else
         {
             TxtNewExportResolutionSummary.Text =
-                $"Output: {rows} × {cols} Grid • {fileW} × {fileH} px/file ({totalPxW} × {totalPxH} px total) • Export/Source Ratio: {ratioText}";
+                $"Output: {rows} × {cols} Grid • {fileW} × {fileH} px/file ({totalPxW} × {totalPxH} px total) • Export/Source: {ratioText}";
         }
 
         HighlightSelectedResolutionButton();
         UpdateExpectedOutputFilesList();
+        UpdateDynamicScaleMatrix();
+        Update3DResolutionDropdownLabels();
+    }
+
+    private void Rebuild3DIfLinkedToExport()
+    {
+        if (Cmb3DResolution?.SelectedIndex == 0 && RbView3D?.IsChecked == true && _tiles.Count > 0)
+        {
+            _ = Rebuild3DVisualizerAsync(forceMeshRebuild: true);
+        }
+    }
+
+    private void BtnToggleHumanScaleMode_Click(object sender, RoutedEventArgs e)
+    {
+        _humanScaleSyncMode = (_humanScaleSyncMode + 1) % 3;
         UpdateDynamicScaleMatrix();
     }
 
@@ -2759,6 +3111,21 @@ public partial class MainWindow : Window
         RenderHumanScaleReference(_lastExportMppForMatrix);
     }
 
+    private void BtnHumanScaleZoomIn_Click(object sender, RoutedEventArgs e)
+    {
+        // Plus button: increases the size of the hill on the right while zooming out the frame to accommodate it
+        _humanScaleHillFactor = Math.Clamp(_humanScaleHillFactor + 0.30, 0.70, 4.0);
+        RenderHumanScaleReference(_lastExportMppForMatrix);
+    }
+
+    private void BtnHumanScaleZoomOut_Click(object sender, RoutedEventArgs e)
+    {
+        // Minus button: decreases the size of the hill on the right while zooming in the frame towards human scale
+        // Clamped at 0.70 (one level less than 0.40) so the human reference stays completely in frame
+        _humanScaleHillFactor = Math.Clamp(_humanScaleHillFactor - 0.30, 0.70, 4.0);
+        RenderHumanScaleReference(_lastExportMppForMatrix);
+    }
+
     private void UpdateDynamicScaleMatrix()
     {
         if (PnlScaleMatrix == null || TxtMatrixRegionSpanKm == null) return;
@@ -2779,8 +3146,10 @@ public partial class MainWindow : Window
             TxtMatrixFidelityRatio.Text = "—";
             TxtMatrixFidelityTitle.Text = "AWAITING DEM DATA";
             TxtMatrixFidelityDesc.Text = "Import DEM GeoTIFF files or select a region of interest to inspect the live scale matrix.";
-            TxtMatrixElevationRange.Text = "—";
-            if (TxtMatrixHumanRatio != null) TxtMatrixHumanRatio.Text = "1 Step = —";
+            if (TxtMatrix3DPreviewSync != null) TxtMatrix3DPreviewSync.Text = "—";
+            if (TxtMatrix3DGroundRes != null) TxtMatrix3DGroundRes.Text = "3D Mesh: —";
+            if (TxtMatrixFidelity3DHint != null) TxtMatrixFidelity3DHint.Text = "Import DEM GeoTIFF files to inspect 3D telemetry.";
+            if (TxtMatrixHumanRatio != null) TxtMatrixHumanRatio.Text = "1 Px = —";
             CnvHumanScaleReference?.Children.Clear();
             if (BdrMatrixFidelityBadge != null)
                 BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeBorderCard"];
@@ -2824,16 +3193,12 @@ public partial class MainWindow : Window
         long totalEstBytes = estBytesPerFile * totalFiles;
 
         string totalEstSizeStr = totalEstBytes >= 1024 * 1024
-            ? $"~{totalEstBytes / (1024.0 * 1024.0):0.1} MB"
+            ? $"~{totalEstBytes / (1024.0 * 1024.0):0.0} MB"
             : $"~{Math.Max(1.0, totalEstBytes / 1024.0):0} KB";
 
         TxtMatrixEstFileSize.Text = totalEstSizeStr;
         TxtMatrixFormatDesc.Text = formatDesc;
-        TxtMatrixBatchSummary.Text = totalFiles == 1 ? "1 Output File" : $"Batch: {totalFiles} Files (~{estBytesPerFile / (1024.0 * 1024.0):0.1} MB/file)";
-
-        var (dispMin, dispMax) = GetEffectiveNormalizationRange();
-        float heightRange = Math.Max(0f, dispMax - dispMin);
-        TxtMatrixElevationRange.Text = $"[{dispMin:F1}m – {dispMax:F1}m]  Δ{heightRange:F1}m";
+        TxtMatrixBatchSummary.Text = totalFiles == 1 ? "1 Output File" : $"Batch: {totalFiles} Files (~{estBytesPerFile / (1024.0 * 1024.0):0.0} MB/file)";
 
         // Fidelity Ratio & Qualitative Indicator
         double ratio = _exportAreaStats.PixelWidth > 0 ? (totalPxW / (double)_exportAreaStats.PixelWidth) : 1.0;
@@ -2844,36 +3209,147 @@ public partial class MainWindow : Window
             if (Math.Abs(ratio - 1.0) < 0.05)
             {
                 BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentExport"];
-                TxtMatrixFidelityRatio.Text = $"{simpRatio} (1:1 PARITY)";
-                TxtMatrixFidelityTitle.Text = "NATIVE PIXEL-TO-METER FIDELITY (EXACT 1:1)";
-                TxtMatrixFidelityDesc.Text = "Export resolution matches source DEM data sampling exactly. Optimal fidelity with zero blur or interpolation.";
+                TxtMatrixFidelityRatio.Text = $"✓ 1:1 SOURCE PARITY";
+                TxtMatrixFidelityTitle.Text = "EXPORT vs. SOURCE DEM: NATIVE 1:1 PARITY";
+                TxtMatrixFidelityDesc.Text = $"Export resolution ({totalPxW:N0} × {totalPxH:N0} px) matches source DEM data sampling ({_exportAreaStats.PixelWidth:N0} × {_exportAreaStats.PixelHeight:N0} px) at {mpp:0.##} m/px. Optimal fidelity with zero blur or interpolation.";
             }
             else if (ratio < 0.95)
             {
                 BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentPrimary"];
-                TxtMatrixFidelityRatio.Text = $"{ratio:0.##}× (DOWNSAMPLED)";
-                TxtMatrixFidelityTitle.Text = "DOWNSAMPLED HIGH-DENSITY TERRAIN";
-                TxtMatrixFidelityDesc.Text = "Heightmap pixels consolidate multiple source DEM pixels. Produces clean, crisp rendering and compact storage.";
+                TxtMatrixFidelityRatio.Text = $"▼ DOWNSAMPLED ({ratio:0.##}×)";
+                TxtMatrixFidelityTitle.Text = $"EXPORT vs. SOURCE DEM: DOWNSAMPLED ({simpRatio})";
+                TxtMatrixFidelityDesc.Text = $"Export resolution ({totalPxW:N0} × {totalPxH:N0} px, {effectiveExportMpp:0.##} m/px) consolidates multiple source DEM pixels ({_exportAreaStats.PixelWidth:N0} × {_exportAreaStats.PixelHeight:N0} px, {mpp:0.##} m/px). Produces clean rendering and compact storage.";
             }
             else if (ratio <= 2.0)
             {
                 BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentWarning"];
-                TxtMatrixFidelityRatio.Text = $"{ratio:0.##}× (UPSAMPLED)";
-                TxtMatrixFidelityTitle.Text = "INTERPOLATED UPSAMPLED RESOLUTION";
-                TxtMatrixFidelityDesc.Text = "Output resolution is finer than source DEM data. Sub-pixel bilinear interpolation smooths high frequencies.";
+                TxtMatrixFidelityRatio.Text = $"▲ UPSAMPLED ({ratio:0.##}×)";
+                TxtMatrixFidelityTitle.Text = $"EXPORT vs. SOURCE DEM: UPSAMPLED ({simpRatio})";
+                TxtMatrixFidelityDesc.Text = $"Export resolution ({totalPxW:N0} × {totalPxH:N0} px, {effectiveExportMpp:0.##} m/px) is finer than source DEM data ({_exportAreaStats.PixelWidth:N0} × {_exportAreaStats.PixelHeight:N0} px, {mpp:0.##} m/px). Sub-pixel bilinear interpolation smooths terrain between native samples.";
             }
             else
             {
                 BdrMatrixFidelityBadge.Background = (Brush)Resources["ThemeAccentDanger"];
-                TxtMatrixFidelityRatio.Text = $"{ratio:0.##}× (OVER-SAMPLED)";
-                TxtMatrixFidelityTitle.Text = "HIGH OVERSAMPLING WARNING (>2× SOURCE)";
-                TxtMatrixFidelityDesc.Text = "Output resolution heavily exceeds source topographic detail. Results in bloated file sizes without adding new real elevation features.";
+                TxtMatrixFidelityRatio.Text = $"▲ OVERSAMPLED ({ratio:0.##}×)";
+                TxtMatrixFidelityTitle.Text = $"EXPORT vs. SOURCE DEM: OVERSAMPLED ({simpRatio})";
+                TxtMatrixFidelityDesc.Text = $"Export resolution ({totalPxW:N0} × {totalPxH:N0} px, {effectiveExportMpp:0.##} m/px) exceeds source topographic detail ({_exportAreaStats.PixelWidth:N0} × {_exportAreaStats.PixelHeight:N0} px, {mpp:0.##} m/px) by >2×. Increases file size without adding new real elevation data.";
             }
         }
 
-        // Pillar 5: Dynamic Human Scale Reference vs Pixel Step Stairs
+        // 3D Preview Mesh & Texture telemetry in Scale Matrix
+        int selected3DRes = GetSelected3DGpuResolution();
+        int selected3DIdx = Cmb3DResolution?.SelectedIndex ?? 0;
+        int gpuTexDim = selected3DRes switch
+        {
+            <= 1024 => 1024,
+            <= 2048 => 2048,
+            <= 4096 => 4096,
+            _ => 8192
+        };
+        int meshSegs = selected3DRes switch
+        {
+            <= 1024 => 256,
+            <= 2048 => 512,
+            <= 4096 => 768,
+            _ => 1024
+        };
+        double quadStepM = physW / Math.Max(1, meshSegs);
+        double texMpp = physW / Math.Max(1, gpuTexDim);
+
+        if (TxtMatrix3DGroundRes != null)
+        {
+            TxtMatrix3DGroundRes.Text = $"3D Tex: {texMpp:0.##} m/px • Mesh: ~{FormatMetricDistance(quadStepM)}/quad";
+        }
+        if (TxtMatrix3DGroundResTooltipTitle != null && TxtMatrix3DGroundResTooltipDesc != null)
+        {
+            TxtMatrix3DGroundResTooltipTitle.Text = $"3D VIEWPORT GROUND RESOLUTION ({gpuTexDim} px Tex / {meshSegs}² Mesh)";
+            TxtMatrix3DGroundResTooltipDesc.Text =
+                $"• 3D Shader Texture: {gpuTexDim:N0} × {gpuTexDim:N0} px ({texMpp:0.##} m/px) — controls normal-mapped hillshade and water detail.\n" +
+                $"• 3D Vertex Mesh: {meshSegs:N0} × {meshSegs:N0} quads (~{FormatMetricDistance(quadStepM)}/quad) — controls displaced 3D silhouette geometry.\n" +
+                $"• Source DEM Reference: {_exportAreaStats.PixelWidth:N0} × {_exportAreaStats.PixelHeight:N0} px ({mpp:0.##} m/px).";
+        }
+
+        int maxExportPx = (int)Math.Max(totalPxW, totalPxH);
+        double expRatio = (double)selected3DRes / Math.Max(1, maxExportPx);
+
+        if (TxtMatrix3DPreviewSync != null)
+        {
+            if (selected3DIdx == 0)
+            {
+                TxtMatrix3DPreviewSync.Text = "3D vs. Export: ✓ Linked (Matches Export)";
+                TxtMatrix3DPreviewSync.Foreground = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+            }
+            else if (Math.Abs(expRatio - 1.0) < 0.05)
+            {
+                TxtMatrix3DPreviewSync.Text = $"3D vs. Export: ✓ Matches ({selected3DRes} px)";
+                TxtMatrix3DPreviewSync.Foreground = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+            }
+            else if (expRatio > 1.05)
+            {
+                TxtMatrix3DPreviewSync.Text = $"3D vs. Export: ▲ Higher ({expRatio:0.##}×)";
+                TxtMatrix3DPreviewSync.Foreground = (Brush)Resources["ThemeAccentWarning"] ?? Brushes.Orange;
+            }
+            else
+            {
+                TxtMatrix3DPreviewSync.Text = $"3D vs. Export: ▼ Lower ({expRatio:0.##}×)";
+                TxtMatrix3DPreviewSync.Foreground = (Brush)Resources["ThemeAccentPrimary"] ?? Brushes.Cyan;
+            }
+        }
+
+        if (TxtMatrix3DPreviewSyncTooltipTitle != null && TxtMatrix3DPreviewSyncTooltipDesc != null)
+        {
+            TxtMatrix3DPreviewSyncTooltipTitle.Text = selected3DIdx == 0
+                ? "3D PREVIEW vs. EXPORT: LINKED"
+                : $"3D PREVIEW vs. EXPORT: DECOUPLED ({expRatio:0.##}×)";
+            TxtMatrix3DPreviewSyncTooltipDesc.Text =
+                $"• Export Target: {totalPxW:N0} × {totalPxH:N0} px ({effectiveExportMpp:0.##} m/px)\n" +
+                $"• 3D Preview Tier: {selected3DRes:N0} px (Shader Texture: {gpuTexDim:N0} px @ {texMpp:0.##} m/px, Mesh: {meshSegs:N0}×{meshSegs:N0} quads @ ~{FormatMetricDistance(quadStepM)}/quad)\n" +
+                (selected3DIdx == 0
+                    ? "The 3D Viewport is linked to your Export Resolution and updates automatically when export settings change."
+                    : "The 3D Viewport is decoupled from your Export Resolution. Click 'Link 3D' in Section 4 or select 'Match Export Res' in the 3D Viewport to re-link.");
+        }
+
+        if (TxtMatrixFidelity3DHint != null)
+        {
+            if (selected3DIdx == 0)
+            {
+                TxtMatrixFidelity3DHint.Text = $"3D preview tracks your export settings ({totalPxW:N0} × {totalPxH:N0} px; 3D Tex: {texMpp:0.##} m/px, Mesh: ~{FormatMetricDistance(quadStepM)}/quad).";
+            }
+            else
+            {
+                TxtMatrixFidelity3DHint.Text = $"3D preview is decoupled at {selected3DRes} px (Tex: {texMpp:0.##} m/px, Mesh: ~{FormatMetricDistance(quadStepM)}/quad) independently of export.";
+            }
+        }
+
+        // Pillar 5: Dynamic Human Scale Reference vs Pixel/Quad Step
         _lastExportMppForMatrix = effectiveExportMpp;
         RenderHumanScaleReference(effectiveExportMpp);
+    }
+
+    private static double GetTerrainNormalizedElevation(double u, double hillFactor = 1.0)
+    {
+        u = Math.Clamp(u, 0.0, 1.0);
+        double K = Math.Clamp(hillFactor, 0.70, 4.0);
+
+        // Profile features:
+        // Left hill knoll (beneath standing human at u = 0.26) and baseline:
+        // These scale down (as 1/K) when zooming out for a larger right mountain,
+        // or scale up when zooming in for a smaller hill.
+        double g1 = 0.28 * Math.Exp(-Math.Pow((u - 0.26) / 0.13, 2.0));
+        double baseElev = 0.08 + 0.03 * Math.Sin(u * Math.PI);
+        double leftTerrain = (baseElev + g1) / K;
+
+        // At apex (u = 0.76), calculate left terrain contribution to ensure
+        // total apex elevation is strictly anchored to 1.000 for all K:
+        double leftAtApex = (0.08 + 0.03 * Math.Sin(0.76 * Math.PI) + 0.28 * Math.Exp(-Math.Pow((0.76 - 0.26) / 0.13, 2.0))) / K;
+        double rightAmp = Math.Max(0.05, 1.0 - leftAtApex);
+
+        // Hill 2 (Right hill): apex anchored at u = 0.76.
+        // Higher hillFactor (larger mountain) sharpens the curvature (smaller sigma2):
+        double sigma2 = Math.Max(0.06, 0.17 / Math.Sqrt(Math.Max(0.4, K)));
+        double g2 = rightAmp * Math.Exp(-Math.Pow((u - 0.76) / sigma2, 2.0));
+
+        return Math.Clamp(leftTerrain + g2, 0.02, 1.00);
     }
 
     private void RenderHumanScaleReference(double effectiveExportMpp)
@@ -2885,9 +3361,65 @@ public partial class MainWindow : Window
         double h = CnvHumanScaleReference.ActualHeight;
         if (w < 20.0 || h < 20.0) return;
 
-        double stepM = Math.Max(0.01, effectiveExportMpp);
+        double mpp = GetMetersPerPixelFromUi();
+        double physW = Math.Max(1.0, _exportAreaStats.PixelWidth * mpp);
+        int selected3DRes = GetSelected3DGpuResolution();
+        int gpuTexDim = selected3DRes switch
+        {
+            <= 1024 => 1024,
+            <= 2048 => 2048,
+            <= 4096 => 4096,
+            _ => 8192
+        };
+        int meshSegs = selected3DRes switch
+        {
+            <= 1024 => 256,
+            <= 2048 => 512,
+            <= 4096 => 768,
+            _ => 1024
+        };
+        double quadStepM = _tiles.Count > 0 ? (physW / Math.Max(1, meshSegs)) : effectiveExportMpp;
+        double texMpp = _tiles.Count > 0 ? (physW / Math.Max(1, gpuTexDim)) : effectiveExportMpp;
+
+        bool is3DViewActive = RbView3D?.IsChecked == true;
+        bool use3DScale = _humanScaleSyncMode == 2 || (_humanScaleSyncMode == 0 && is3DViewActive);
+
+        double stepM = Math.Max(0.01, use3DScale ? texMpp : effectiveExportMpp);
+        string unitTag = use3DScale ? "3D Tex Px" : "Export Px";
         const double humanM = 1.75;
         double ratio = stepM / humanM;
+
+        if (BtnToggleHumanScaleMode != null)
+        {
+            bool matches3D = Math.Abs(effectiveExportMpp - texMpp) < 0.05;
+            if (_humanScaleSyncMode == 0)
+            {
+                BtnToggleHumanScaleMode.Content = is3DViewActive
+                    ? $"Mode: 3D View ({texMpp:0.##}m/px • ~{FormatMetricDistance(quadStepM)}/quad)"
+                    : (matches3D ? "Mode: Export = 3D (Synced)" : $"Mode: Export ({effectiveExportMpp:0.##}m/px vs 3D {texMpp:0.##}m/px)");
+            }
+            else if (_humanScaleSyncMode == 1)
+            {
+                BtnToggleHumanScaleMode.Content = matches3D
+                    ? $"Mode: Export Res ({effectiveExportMpp:0.##}m/px = 3D)"
+                    : $"Mode: Export Res ({effectiveExportMpp:0.##}m/px ≠ 3D {texMpp:0.##}m/px)";
+            }
+            else
+            {
+                BtnToggleHumanScaleMode.Content = $"Mode: 3D Viewport ({texMpp:0.##}m/px • ~{FormatMetricDistance(quadStepM)}/quad)";
+            }
+
+            if (TxtHumanScaleModeTooltipDesc != null)
+            {
+                TxtHumanScaleModeTooltipDesc.Text =
+                    $"• Active Graph Profile: {(use3DScale ? $"3D Viewport Shader Texture ({texMpp:0.##} m/px) & Mesh (~{FormatMetricDistance(quadStepM)}/quad)" : $"Export File Resolution ({effectiveExportMpp:0.##} m/px)")}\n" +
+                    $"• Export Resolution: {effectiveExportMpp:0.##} m/px\n" +
+                    $"• 3D Viewport Texture: {texMpp:0.##} m/px ({gpuTexDim} × {gpuTexDim} px)\n" +
+                    $"• 3D Viewport Mesh: ~{FormatMetricDistance(quadStepM)}/quad ({meshSegs} × {meshSegs} quads)\n" +
+                    $"• Source DEM Native: {mpp:0.##} m/px\n\n" +
+                    "Click this button to cycle the Human Ground Scale reference between Auto (follows active 2D/3D tab), Export Resolution, and 3D Viewport Resolution.";
+            }
+        }
 
         // Telemetry Ratio Header
         if (TxtMatrixHumanRatio != null)
@@ -2897,190 +3429,214 @@ public partial class MainWindow : Window
                                $"{stepM:0.##}m";
 
             if (ratio < 0.2)
-                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (Ankle)";
+                TxtMatrixHumanRatio.Text = $"1 {unitTag} = {stepLabel} (Fine Detail)";
             else if (ratio < 0.5)
-                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (Knee)";
+                TxtMatrixHumanRatio.Text = $"1 {unitTag} = {stepLabel} (Knee Height)";
             else if (ratio < 0.85)
-                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (Waist)";
+                TxtMatrixHumanRatio.Text = $"1 {unitTag} = {stepLabel} (Waist Height)";
             else if (ratio <= 1.15)
-                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} (1:1 Human)";
+                TxtMatrixHumanRatio.Text = $"1 {unitTag} = {stepLabel} (1:1 Human)";
             else if (ratio < 3.0)
-                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} ({ratio:0.#}× Tall)";
+                TxtMatrixHumanRatio.Text = $"1 {unitTag} = {stepLabel} ({ratio:0.#}× Person)";
             else if (ratio < 10.0)
-                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} ({ratio:0.#}× Cliff)";
+                TxtMatrixHumanRatio.Text = $"1 {unitTag} = {stepLabel} ({ratio:0.#}× Hill)";
             else
-                TxtMatrixHumanRatio.Text = $"1 Step = {stepLabel} ({ratio:0.#}× Monolith)";
+                TxtMatrixHumanRatio.Text = $"1 {unitTag} = {stepLabel} ({ratio:0.#}× Mountain)";
+
+            if (TxtMatrixHumanRatioTooltipDesc != null)
+            {
+                TxtMatrixHumanRatioTooltipDesc.Text =
+                    $"1 {unitTag} ({stepLabel}) is {ratio:0.##}× the height of a 1.75m human.\n" +
+                    $"• Export Ground Step: {effectiveExportMpp:0.##} m/px\n" +
+                    $"• 3D Texture Ground Step: {texMpp:0.##} m/px\n" +
+                    $"• 3D Mesh Quad Step: ~{FormatMetricDistance(quadStepM)}/quad";
+            }
         }
 
         double groundY = h - 6.0;
-        double targetHumanPx;
-        double targetStepPx;
+        double maxTerrainH = Math.Max(20.0, h - 22.0);
+        double humanNormX = 0.26;
+        double humanBaseX = humanNormX * w;
+        double approxHumanGroundY = groundY - GetTerrainNormalizedElevation(humanNormX, _humanScaleHillFactor) * maxTerrainH;
 
-        if (ratio <= 1.0)
+        // Human target pixel height (inversely scales with hillFactor: zooms in when hill is smaller, zooms out when hill is larger)
+        double baseHumanPx = Math.Clamp(maxTerrainH * 0.30, 16.0, 36.0);
+        double targetHumanPx = Math.Clamp(baseHumanPx / _humanScaleHillFactor, 8.0, 56.0);
+
+        // If stepM is very large relative to human height, gracefully scale human down so both human and terrain steps fit
+        double prelimPpm = targetHumanPx / humanM;
+        double prelimStepPx = stepM * prelimPpm;
+        if (prelimStepPx > w * 0.45 && prelimStepPx > 1e-4)
         {
-            // Human is larger than or equal to 1 step
-            targetHumanPx = Math.Clamp(h * 0.70, 24.0, 42.0);
-            double ppm = targetHumanPx / humanM;
-            targetStepPx = Math.Max(2.5, stepM * ppm);
+            targetHumanPx = Math.Max(6.0, targetHumanPx * ((w * 0.45) / prelimStepPx));
         }
-        else if (ratio <= 6.0)
+        if (approxHumanGroundY - targetHumanPx < 4.0)
         {
-            // Step is 1x to 6x human
-            targetStepPx = Math.Clamp(h * 0.76, 26.0, 45.0);
-            double ppm = targetStepPx / stepM;
-            targetHumanPx = Math.Max(12.0, humanM * ppm);
+            targetHumanPx = Math.Max(6.0, approxHumanGroundY - 4.0);
         }
-        else
-        {
-            // Step is huge (cliff / mountain pixel)
-            targetHumanPx = 12.0; // Keep human recognizable
-            targetStepPx = h - 10.0;
-        }
+
+        // Single authoritative pixels-per-meter (ppm) used for human figure, sample step spacing, and HILL ELEV axis
+        double ppm = Math.Max(1e-4, targetHumanPx / humanM);
+        double sampleStepPx = Math.Clamp(stepM * ppm, 1.5, w * 0.45);
 
         var accentBrush = (Brush)Resources["ThemeAccentExport"] ?? Brushes.Goldenrod;
         var primaryBrush = (Brush)Resources["ThemeAccentPrimary"] ?? Brushes.Cyan;
         var textMuted = (Brush)Resources["ThemeTextMuted"] ?? Brushes.Gray;
-        var stepFill = new SolidColorBrush(Color.FromArgb(50, 232, 168, 73));
-        stepFill.Freeze();
+        var bgWell = (Brush)Resources["ThemeBgWell"] ?? Brushes.Black;
+        var terrainFillBrush = new SolidColorBrush(Color.FromArgb(45, 232, 168, 73));
+        terrainFillBrush.Freeze();
 
-        // Ground baseline
-        var groundLine = new Line
+        // 1. Faint Smooth Guide Contour (subtle background reference)
+        var guideGeom = new StreamGeometry();
+        using (var ctx = guideGeom.Open())
         {
-            X1 = 4.0,
-            Y1 = groundY,
-            X2 = w - 4.0,
-            Y2 = groundY,
+            double startY = groundY - GetTerrainNormalizedElevation(0.0, _humanScaleHillFactor) * maxTerrainH;
+            ctx.BeginFigure(new Point(0.0, startY), false, false);
+            int guideSegments = Math.Max(30, (int)(w / 4.0));
+            for (int i = 1; i <= guideSegments; i++)
+            {
+                double u = (double)i / guideSegments;
+                double gx = u * w;
+                double gy = groundY - GetTerrainNormalizedElevation(u, _humanScaleHillFactor) * maxTerrainH;
+                ctx.LineTo(new Point(gx, gy), true, false);
+            }
+        }
+        guideGeom.Freeze();
+        var guidePath = new System.Windows.Shapes.Path
+        {
+            Data = guideGeom,
             Stroke = textMuted,
             StrokeThickness = 1.0,
-            StrokeDashArray = new DoubleCollection { 3, 2 },
-            Opacity = 0.6
+            StrokeDashArray = new DoubleCollection { 2.5, 2.5 },
+            Opacity = 0.28,
+            IsHitTestVisible = false
         };
-        CnvHumanScaleReference.Children.Add(groundLine);
+        CnvHumanScaleReference.Children.Add(guidePath);
 
-        // Anchor positions: place human on left, stairs in center/right
-        double baseX = Math.Clamp(w * 0.22, 28.0, 50.0);
-        double stepStartX = baseX + 0.22 * targetHumanPx;
+        // 2. Dynamic Resolution DEM Ground Profile (smooth point-to-point connection)
+        double humanGroundY = approxHumanGroundY;
 
-        // Draw Stairs (Pixel Steps)
-        if (ratio <= 0.45)
+        int numSteps = (int)Math.Ceiling(w / sampleStepPx);
+        var terrainGeom = new StreamGeometry();
+        var samplePoints = new List<Point>();
+
+        using (var ctx = terrainGeom.Open())
         {
-            // Multiple small steps (like a real staircase)
-            int numSteps = Math.Clamp((int)Math.Round(1.75 / stepM), 2, 5);
-            double curX = stepStartX;
-            double curY = groundY;
+            ctx.BeginFigure(new Point(0.0, groundY), true, true);
 
-            var stairGeom = new StreamGeometry();
-            using (var ctx = stairGeom.Open())
+            double y0 = groundY - GetTerrainNormalizedElevation(0.0, _humanScaleHillFactor) * maxTerrainH;
+            ctx.LineTo(new Point(0.0, y0), true, false);
+            samplePoints.Add(new Point(0.0, y0));
+
+            double prevX = 0.0;
+            double prevY = y0;
+
+            for (int i = 1; i <= numSteps; i++)
             {
-                ctx.BeginFigure(new Point(curX, groundY), true, true);
-                for (int i = 0; i < numSteps; i++)
+                double nextX = Math.Min(w, i * sampleStepPx);
+                double u = nextX / w;
+                double nextY = groundY - GetTerrainNormalizedElevation(u, _humanScaleHillFactor) * maxTerrainH;
+
+                // Accurately anchor the human's feet to the line segment directly under their position
+                if (humanBaseX >= prevX && humanBaseX <= nextX && nextX > prevX)
                 {
-                    curY -= targetStepPx;
-                    ctx.LineTo(new Point(curX, curY), true, false);
-                    curX += targetStepPx;
-                    ctx.LineTo(new Point(curX, curY), true, false);
+                    double t = (humanBaseX - prevX) / (nextX - prevX);
+                    humanGroundY = prevY + t * (nextY - prevY);
                 }
-                ctx.LineTo(new Point(curX, groundY), true, false);
+
+                ctx.LineTo(new Point(nextX, nextY), true, false);
+                samplePoints.Add(new Point(nextX, nextY));
+
+                prevX = nextX;
+                prevY = nextY;
+                if (nextX >= w) break;
             }
-            stairGeom.Freeze();
 
-            var stairPath = new System.Windows.Shapes.Path
-            {
-                Data = stairGeom,
-                Fill = stepFill,
-                Stroke = accentBrush,
-                StrokeThickness = 1.2
-            };
-            CnvHumanScaleReference.Children.Add(stairPath);
-
-            // Step dimension label
-            var txtStep = new TextBlock
-            {
-                Text = $"{stepM:0.##}m / px",
-                FontSize = 7.5,
-                FontWeight = FontWeights.Bold,
-                Foreground = accentBrush
-            };
-            Canvas.SetLeft(txtStep, Math.Min(w - 55.0, stepStartX + 4.0));
-            Canvas.SetTop(txtStep, Math.Max(2.0, curY - 12.0));
-            CnvHumanScaleReference.Children.Add(txtStep);
+            ctx.LineTo(new Point(w, groundY), true, false);
         }
-        else
+        terrainGeom.Freeze();
+
+        var terrainPath = new System.Windows.Shapes.Path
         {
-            // 1 or 2 large steps / cliff
-            double stepTopY = Math.Max(4.0, groundY - targetStepPx);
-            double stepEndX = Math.Min(w - 8.0, stepStartX + Math.Max(targetStepPx, 35.0));
+            Data = terrainGeom,
+            Fill = terrainFillBrush,
+            Stroke = accentBrush,
+            StrokeThickness = 1.4,
+            IsHitTestVisible = false
+        };
+        CnvHumanScaleReference.Children.Add(terrainPath);
 
-            var stairGeom = new StreamGeometry();
-            using (var ctx = stairGeom.Open())
+        // Draw themed bright accent vertex dots on the points along the ground arc line
+        // Uses ThemeAccentWarning (orange in the default theme) to contrast against the line
+        var dotBrush = (Brush)Resources["ThemeAccentWarning"] ?? new SolidColorBrush(Color.FromRgb(224, 155, 56));
+        double dotRadius = Math.Clamp(sampleStepPx * 0.35, 1.8, 2.7);
+        foreach (var pt in samplePoints)
+        {
+            var dot = new Ellipse
             {
-                ctx.BeginFigure(new Point(stepStartX, groundY), true, true);
-                ctx.LineTo(new Point(stepStartX, stepTopY), true, false);
-                ctx.LineTo(new Point(stepEndX, stepTopY), true, false);
-                ctx.LineTo(new Point(stepEndX, groundY), true, false);
-            }
-            stairGeom.Freeze();
-
-            var stairPath = new System.Windows.Shapes.Path
-            {
-                Data = stairGeom,
-                Fill = stepFill,
-                Stroke = accentBrush,
-                StrokeThickness = 1.3
+                Width = dotRadius * 2.0,
+                Height = dotRadius * 2.0,
+                Fill = dotBrush,
+                Stroke = bgWell,
+                StrokeThickness = 0.8,
+                IsHitTestVisible = false
             };
-            CnvHumanScaleReference.Children.Add(stairPath);
-
-            // Pixel Step Dimension Pill
-            string stepDimText = ratio > 5.0 ? $"1 PX = {stepM:0.#}m (CLIFF)" : $"1 PX = {stepM:0.##}m";
-            var txtStep = new TextBlock
-            {
-                Text = stepDimText,
-                FontSize = 8.0,
-                FontWeight = FontWeights.Bold,
-                Foreground = accentBrush
-            };
-            Canvas.SetLeft(txtStep, Math.Min(w - 75.0, stepStartX + 5.0));
-            Canvas.SetTop(txtStep, Math.Max(2.0, stepTopY - 12.0));
-            CnvHumanScaleReference.Children.Add(txtStep);
-
-            // Hatching lines for huge cliff steps
-            if (ratio > 5.0)
-            {
-                for (double hy = stepTopY + 8.0; hy < groundY - 4.0; hy += 7.0)
-                {
-                    var hatch = new Line
-                    {
-                        X1 = stepStartX + 3.0,
-                        Y1 = hy,
-                        X2 = stepStartX + 12.0,
-                        Y2 = hy - 4.0,
-                        Stroke = accentBrush,
-                        StrokeThickness = 0.8,
-                        Opacity = 0.4
-                    };
-                    CnvHumanScaleReference.Children.Add(hatch);
-                }
-            }
+            Canvas.SetLeft(dot, pt.X - dotRadius);
+            Canvas.SetTop(dot, pt.Y - dotRadius);
+            CnvHumanScaleReference.Children.Add(dot);
         }
 
-        // Draw Stepping Human Silhouette
-        DrawSteppingHumanFigure(baseX, groundY, targetHumanPx, stepStartX, groundY - targetStepPx);
+        // Dynamically position the stacked zoom buttons centered underneath the right hill body
+        double axisX = Math.Max(60.0, w - 38.0);
+        double hill2CrestX = 0.76 * w;
+        double hill2TopY = groundY - GetTerrainNormalizedElevation(0.76, _humanScaleHillFactor) * maxTerrainH;
+        double hillHeightMeters = maxTerrainH / ppm;
 
-        // Height bracket for the human
-        double bracketX = Math.Max(2.0, baseX - 10.0);
-        double humanTopY = groundY - targetHumanPx;
+        if (PnlHumanScaleZoomButtons != null)
+        {
+            double hill2Center = hill2CrestX;
+            double btnLeft = Math.Clamp(hill2Center - 9.0, 20.0, Math.Max(20.0, axisX - 26.0));
+            double bottomMargin = Math.Max(18.0, (maxTerrainH - 38.0) * 0.5 + 6.0);
+            PnlHumanScaleZoomButtons.Margin = new Thickness(btnLeft, 0, 0, bottomMargin);
+        }
+
+        // 3. Ground baseline (dashed bottom line)
+        var baseline = new Line
+        {
+            X1 = 2.0,
+            Y1 = groundY,
+            X2 = w - 2.0,
+            Y2 = groundY,
+            Stroke = textMuted,
+            StrokeThickness = 0.8,
+            StrokeDashArray = new DoubleCollection { 3, 2 },
+            Opacity = 0.5,
+            IsHitTestVisible = false
+        };
+        CnvHumanScaleReference.Children.Add(baseline);
+
+        // 4. Human silhouette standing on Hill 1 crest
+        if (humanGroundY - targetHumanPx < 4.0)
+        {
+            targetHumanPx = Math.Max(8.0, humanGroundY - 4.0);
+        }
+        DrawStandingHumanFigure(humanBaseX, humanGroundY, targetHumanPx);
+
+        // 5. Height bracket for the human reference
+        double bracketX = Math.Max(2.0, humanBaseX - (targetHumanPx * 0.35) - 6.0);
+        double humanTopY = humanGroundY - targetHumanPx;
         var bracketLine = new Line
         {
             X1 = bracketX,
             Y1 = humanTopY,
             X2 = bracketX,
-            Y2 = groundY,
+            Y2 = humanGroundY,
             Stroke = primaryBrush,
             StrokeThickness = 0.8,
             Opacity = 0.7
         };
         var tickTop = new Line { X1 = bracketX - 2.0, Y1 = humanTopY, X2 = bracketX + 2.0, Y2 = humanTopY, Stroke = primaryBrush, StrokeThickness = 0.8 };
-        var tickBottom = new Line { X1 = bracketX - 2.0, Y1 = groundY, X2 = bracketX + 2.0, Y2 = groundY, Stroke = primaryBrush, StrokeThickness = 0.8 };
+        var tickBottom = new Line { X1 = bracketX - 2.0, Y1 = humanGroundY, X2 = bracketX + 2.0, Y2 = humanGroundY, Stroke = primaryBrush, StrokeThickness = 0.8 };
         CnvHumanScaleReference.Children.Add(bracketLine);
         CnvHumanScaleReference.Children.Add(tickTop);
         CnvHumanScaleReference.Children.Add(tickBottom);
@@ -3094,18 +3650,166 @@ public partial class MainWindow : Window
             Opacity = 0.9
         };
         Canvas.SetLeft(txtHuman, Math.Max(1.0, bracketX - 20.0));
-        Canvas.SetTop(txtHuman, groundY - (targetHumanPx * 0.5) - 5.0);
+        Canvas.SetTop(txtHuman, humanGroundY - (targetHumanPx * 0.5) - 5.0);
         CnvHumanScaleReference.Children.Add(txtHuman);
+
+        // 6. Vertical axis scale on the right side showing Hill 2 height
+        // Subtle dashed guide line connecting the hill apex across to the vertical scale tick
+        var hillApexGuide = new Line
+        {
+            X1 = hill2CrestX,
+            Y1 = hill2TopY,
+            X2 = axisX - 3.5,
+            Y2 = hill2TopY,
+            Stroke = textMuted,
+            StrokeThickness = 0.8,
+            StrokeDashArray = new DoubleCollection { 2, 2 },
+            Opacity = 0.45,
+            IsHitTestVisible = false
+        };
+        CnvHumanScaleReference.Children.Add(hillApexGuide);
+
+        // Vertical axis backbone line
+        var axisLine = new Line
+        {
+            X1 = axisX,
+            Y1 = hill2TopY,
+            X2 = axisX,
+            Y2 = groundY,
+            Stroke = primaryBrush,
+            StrokeThickness = 1.0,
+            Opacity = 0.75,
+            IsHitTestVisible = false
+        };
+        CnvHumanScaleReference.Children.Add(axisLine);
+
+        // Top tick at hill apex
+        var tickApex = new Line
+        {
+            X1 = axisX - 3.5,
+            Y1 = hill2TopY,
+            X2 = axisX + 3.5,
+            Y2 = hill2TopY,
+            Stroke = primaryBrush,
+            StrokeThickness = 1.0,
+            IsHitTestVisible = false
+        };
+        CnvHumanScaleReference.Children.Add(tickApex);
+
+        string apexHeightText = hillHeightMeters >= 1000.0 ? $"{hillHeightMeters / 1000.0:0.##} km" :
+                                hillHeightMeters >= 10.0 ? $"{hillHeightMeters:0.#} m" :
+                                $"{hillHeightMeters:0.##} m";
+
+        var txtApex = new TextBlock
+        {
+            Text = apexHeightText,
+            FontSize = 7.5,
+            FontWeight = FontWeights.Bold,
+            Foreground = primaryBrush,
+            Opacity = 0.95,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(txtApex, axisX + 5.0);
+        Canvas.SetTop(txtApex, Math.Max(0.0, hill2TopY - 5.0));
+        CnvHumanScaleReference.Children.Add(txtApex);
+
+        // Midpoint tick at 50% hill height
+        double midY = (hill2TopY + groundY) * 0.5;
+        var tickMid = new Line
+        {
+            X1 = axisX - 2.5,
+            Y1 = midY,
+            X2 = axisX + 2.5,
+            Y2 = midY,
+            Stroke = primaryBrush,
+            StrokeThickness = 0.8,
+            Opacity = 0.7,
+            IsHitTestVisible = false
+        };
+        CnvHumanScaleReference.Children.Add(tickMid);
+
+        double midMeters = hillHeightMeters * 0.5;
+        string midHeightText = midMeters >= 1000.0 ? $"{midMeters / 1000.0:0.##} km" :
+                               midMeters >= 10.0 ? $"{midMeters:0.#} m" :
+                               $"{midMeters:0.##} m";
+
+        var txtMid = new TextBlock
+        {
+            Text = midHeightText,
+            FontSize = 6.5,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = textMuted,
+            Opacity = 0.85,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(txtMid, axisX + 5.0);
+        Canvas.SetTop(txtMid, midY - 4.5);
+        CnvHumanScaleReference.Children.Add(txtMid);
+
+        // Baseline tick at 0m
+        var tickBase = new Line
+        {
+            X1 = axisX - 3.5,
+            Y1 = groundY,
+            X2 = axisX + 3.5,
+            Y2 = groundY,
+            Stroke = primaryBrush,
+            StrokeThickness = 1.0,
+            IsHitTestVisible = false
+        };
+        CnvHumanScaleReference.Children.Add(tickBase);
+
+        var txtBase = new TextBlock
+        {
+            Text = "0 m",
+            FontSize = 7.0,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = textMuted,
+            Opacity = 0.85,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(txtBase, axisX + 5.0);
+        Canvas.SetTop(txtBase, groundY - 5.0);
+        CnvHumanScaleReference.Children.Add(txtBase);
+
+        // Axis title / header above top tick
+        var txtAxisTitle = new TextBlock
+        {
+            Text = "HILL ELEV",
+            FontSize = 6.5,
+            FontWeight = FontWeights.Bold,
+            Foreground = (Brush)Resources["ThemeAccentWarning"] ?? Brushes.Orange,
+            Opacity = 0.9,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(txtAxisTitle, Math.Max(2.0, axisX - 10.0));
+        Canvas.SetTop(txtAxisTitle, Math.Max(0.0, hill2TopY - 13.0));
+        CnvHumanScaleReference.Children.Add(txtAxisTitle);
+
+        // 7. DEM Pixel / 3D Viewport Resolution Callout (indicates the dynamic resolution step)
+        string stepDimText = use3DScale
+            ? $"3D TEX = {texMpp:0.##}m/px • MESH = ~{FormatMetricDistance(quadStepM)}/quad"
+            : (ratio > 6.0 ? $"EXPORT 1 PX = {stepM:0.#}m (BLOCK)" : $"EXPORT 1 PX = {stepM:0.##}m");
+        var txtPixelStep = new TextBlock
+        {
+            Text = stepDimText,
+            FontSize = 7.5,
+            FontWeight = FontWeights.Bold,
+            Foreground = accentBrush
+        };
+        Canvas.SetLeft(txtPixelStep, Math.Clamp(hill2CrestX - 45.0, 26.0, Math.Max(26.0, axisX - 95.0)));
+        Canvas.SetTop(txtPixelStep, Math.Max(2.0, hill2TopY - 11.0));
+        CnvHumanScaleReference.Children.Add(txtPixelStep);
     }
 
-    private void DrawSteppingHumanFigure(double baseX, double baseY, double h, double stepX, double stepY)
+    private void DrawStandingHumanFigure(double baseX, double baseY, double h)
     {
         var figureBrush = (Brush)Resources["ThemeTextPrimary"] ?? Brushes.White;
-        double strokeW = Math.Max(1.3, h * 0.075);
+        double strokeW = Math.Max(1.2, h * 0.08);
 
         // Head
-        double headR = Math.Max(1.5, h * 0.08);
-        double headCx = baseX + 0.16 * h;
+        double headR = Math.Max(1.8, h * 0.085);
+        double headCx = baseX;
         double headCy = baseY - 0.90 * h;
 
         var head = new Ellipse
@@ -3118,39 +3822,37 @@ public partial class MainWindow : Window
         Canvas.SetTop(head, headCy - headR);
         CnvHumanScaleReference.Children.Add(head);
 
-        // Torso (leaning slightly into the step)
-        var shoulders = new Point(baseX + 0.14 * h, baseY - 0.77 * h);
-        var hips = new Point(baseX + 0.08 * h, baseY - 0.48 * h);
-        AddFigureLine(shoulders, hips, strokeW, figureBrush);
+        // Torso (standing upright, facing right towards Hill 2)
+        var neck = new Point(baseX, baseY - 0.81 * h);
+        var shoulders = new Point(baseX, baseY - 0.77 * h);
+        var hips = new Point(baseX, baseY - 0.48 * h);
+        AddFigureLine(neck, hips, strokeW * 1.1, figureBrush);
 
-        // Back leg (supporting on ground)
-        var backKnee = new Point(baseX + 0.03 * h, baseY - 0.25 * h);
-        var backAnkle = new Point(baseX + 0.00 * h, baseY - 0.03 * h);
+        // Back leg (left leg, slightly back for stable stance)
+        var backKnee = new Point(baseX - 0.04 * h, baseY - 0.25 * h);
+        var backFoot = new Point(baseX - 0.05 * h, baseY);
         AddFigureLine(hips, backKnee, strokeW, figureBrush);
-        AddFigureLine(backKnee, backAnkle, strokeW, figureBrush);
-        AddFigureLine(new Point(baseX - 0.04 * h, baseY), new Point(baseX + 0.04 * h, baseY), strokeW * 0.9, figureBrush);
+        AddFigureLine(backKnee, backFoot, strokeW, figureBrush);
+        AddFigureLine(new Point(backFoot.X - 0.03 * h, baseY), new Point(backFoot.X + 0.03 * h, baseY), strokeW * 0.9, figureBrush);
 
-        // Front leg (stepping up onto the step tread)
-        double targetStepRise = baseY - stepY;
-        double stepContactY = (targetStepRise > 0.0 && targetStepRise < h * 0.6) ? stepY : (baseY - Math.Min(h * 0.45, Math.Max(4.0, targetStepRise)));
-        double frontFootX = Math.Max(baseX + 0.22 * h, stepX + 3.0);
-        var frontKnee = new Point(baseX + 0.20 * h, Math.Min(baseY - 0.40 * h, stepContactY - 0.06 * h));
-        var frontAnkle = new Point(frontFootX, stepContactY - 0.02 * h);
-
+        // Front leg (right leg, forward towards hill)
+        var frontKnee = new Point(baseX + 0.04 * h, baseY - 0.24 * h);
+        var frontFoot = new Point(baseX + 0.06 * h, baseY);
         AddFigureLine(hips, frontKnee, strokeW, figureBrush);
-        AddFigureLine(frontKnee, frontAnkle, strokeW, figureBrush);
-        AddFigureLine(new Point(frontFootX - 0.02 * h, stepContactY), new Point(frontFootX + 0.06 * h, stepContactY), strokeW * 0.9, figureBrush);
+        AddFigureLine(frontKnee, frontFoot, strokeW, figureBrush);
+        AddFigureLine(new Point(frontFoot.X - 0.02 * h, baseY), new Point(frontFoot.X + 0.05 * h, baseY), strokeW * 0.9, figureBrush);
 
-        // Arms (Dynamic climbing posture)
-        var leadElbow = new Point(baseX + 0.26 * h, baseY - 0.62 * h);
-        var leadHand = new Point(baseX + 0.33 * h, baseY - 0.54 * h);
-        AddFigureLine(shoulders, leadElbow, strokeW * 0.85, figureBrush);
-        AddFigureLine(leadElbow, leadHand, strokeW * 0.85, figureBrush);
-
-        var trailElbow = new Point(baseX - 0.01 * h, baseY - 0.64 * h);
-        var trailHand = new Point(baseX - 0.06 * h, baseY - 0.52 * h);
+        // Trail arm (left arm resting naturally along side)
+        var trailElbow = new Point(baseX - 0.06 * h, baseY - 0.62 * h);
+        var trailHand = new Point(baseX - 0.05 * h, baseY - 0.47 * h);
         AddFigureLine(shoulders, trailElbow, strokeW * 0.85, figureBrush);
         AddFigureLine(trailElbow, trailHand, strokeW * 0.85, figureBrush);
+
+        // Lead arm (right arm, surveying forward / pointing towards Hill 2)
+        var leadElbow = new Point(baseX + 0.09 * h, baseY - 0.65 * h);
+        var leadHand = new Point(baseX + 0.16 * h, baseY - 0.62 * h);
+        AddFigureLine(shoulders, leadElbow, strokeW * 0.85, figureBrush);
+        AddFigureLine(leadElbow, leadHand, strokeW * 0.85, figureBrush);
     }
 
     private void AddFigureLine(Point p1, Point p2, double thickness, Brush brush)
@@ -3221,7 +3923,7 @@ public partial class MainWindow : Window
             ? ((long)fileWidth * fileHeight * (tiffFloat32 ? 4L : 2L) + 4096L)
             : ((long)(fileWidth * fileHeight * 2.0 * 0.65) + 1024L);
         string estSizeLabel = estBytesPerFile >= 1024 * 1024
-            ? $"~{estBytesPerFile / (1024.0 * 1024.0):0.1} MB"
+            ? $"~{estBytesPerFile / (1024.0 * 1024.0):0.0} MB"
             : $"~{Math.Max(1.0, estBytesPerFile / 1024.0):0} KB";
 
         var mosaic = DemProcessor.BuildMosaicDescriptor(_tiles, _globalMin);
@@ -3379,66 +4081,6 @@ public partial class MainWindow : Window
         return $"{meters:0.#} m";
     }
 
-    private static void FormatNiceScaleBar(double metersPerScreenPixel, double targetBarPx, out double barWidthPx, out string distanceLabel)
-    {
-        double safeMpp = Math.Max(1e-6, metersPerScreenPixel);
-        double rawMeters = safeMpp * targetBarPx;
-        double exp = Math.Floor(Math.Log10(Math.Max(1e-3, rawMeters)));
-        double baseVal = Math.Pow(10.0, exp);
-        double[] niceSteps = { 1.0, 2.0, 2.5, 5.0, 10.0 };
-
-        double niceMeters = baseVal;
-        foreach (double s in niceSteps)
-        {
-            double candidate = s * baseVal;
-            if (Math.Abs(candidate - rawMeters) < Math.Abs(niceMeters - rawMeters))
-            {
-                niceMeters = candidate;
-            }
-        }
-
-        barWidthPx = Math.Clamp(niceMeters / safeMpp, 36.0, 155.0);
-        distanceLabel = niceMeters >= 1000.0
-            ? $"{niceMeters / 1000.0:0.##} km"
-            : $"{niceMeters:0.##} m";
-    }
-
-    private void Update2DScaleBar()
-    {
-        if (Bdr2DScaleBar == null || Rect2DScaleLine == null || Txt2DScaleBarLabel == null || Txt2DScaleTotalSpan == null)
-            return;
-
-        if (_tiles.Count == 0 || RbViewGrid?.IsChecked != true)
-        {
-            Bdr2DScaleBar.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        Bdr2DScaleBar.Visibility = Visibility.Visible;
-
-        var mosaic = DemProcessor.BuildMosaicDescriptor(_tiles, _globalMin);
-        double mpp = GetMetersPerPixelFromUi();
-        double totalPhysW = Math.Max(1.0, mosaic.TotalWidth * mpp);
-        double totalPhysH = Math.Max(1.0, mosaic.TotalHeight * mpp);
-        double canvasW = Math.Max(1.0, _mosaicCanvasWidth);
-
-        double metersPerScreenPx = totalPhysW / canvasW;
-        FormatNiceScaleBar(metersPerScreenPx, 90.0, out double barPx, out string distLabel);
-
-        Rect2DScaleLine.Width = barPx;
-        Txt2DScaleBarLabel.Text = distLabel;
-
-        if (IsCustomExportAreaActive)
-        {
-            double zonePhysW = _exportAreaStats.PixelWidth * mpp;
-            Txt2DScaleTotalSpan.Text = $"Grid: {FormatMetricDistance(totalPhysW)} × {FormatMetricDistance(totalPhysH)} • Zone: {FormatMetricDistance(zonePhysW)}";
-        }
-        else
-        {
-            Txt2DScaleTotalSpan.Text = $"Grid Span: {FormatMetricDistance(totalPhysW)} × {FormatMetricDistance(totalPhysH)}";
-        }
-    }
-
     private void Update3DScaleBar()
     {
         if (Bdr3DScaleBar == null || Rect3DScaleLine == null || Txt3DScaleBarLabel == null || Txt3DScaleTotalSpan == null)
@@ -3459,15 +4101,20 @@ public partial class MainWindow : Window
         double metersPerWorldUnit = activeZoneWidthMeters / 2.0;
         double metersPerScreenPx = (visibleWorldWidth * metersPerWorldUnit) / Math.Max(100.0, vpWidth);
 
-        FormatNiceScaleBar(metersPerScreenPx, 90.0, out double barPx, out string distLabel);
+        // Synchronize scale reference bar to the active 3D terrain scale grid increment
+        double visibleSpanMeters = visibleWorldWidth * metersPerWorldUnit;
+        double gridMeters = GetDynamicScaleGridIncrement(visibleSpanMeters);
+        _lastGridIncrementMeters = gridMeters;
+
+        // Screen pixels occupied by one grid square
+        double gridSquareScreenPx = gridMeters / Math.Max(1e-6, metersPerScreenPx);
+        double barPx = Math.Clamp(gridSquareScreenPx, 18.0, 240.0);
 
         Rect3DScaleLine.Width = barPx;
-        Txt3DScaleBarLabel.Text = distLabel;
-
-        var (dispMin, dispMax) = GetEffectiveNormalizationRange();
-        float deltaZ = Math.Max(0f, dispMax - dispMin);
-        string modeLabel = IsCustomExportAreaActive ? "Zone Span" : "Global Span";
-        Txt3DScaleTotalSpan.Text = $"{modeLabel}: {FormatMetricDistance(activeZoneWidthMeters)} • ΔZ: {deltaZ:F1}m";
+        string gridDistStr = FormatMetricDistance(gridMeters);
+        Txt3DScaleBarLabel.Text = $"{gridDistStr} Grid Square";
+        Txt3DScaleTotalSpan.Text = $"1 Grid Square = {gridDistStr} × {gridDistStr}";
+        Update3DHudTitle();
     }
 
     private void CmbExportFileFormat_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -3496,6 +4143,7 @@ public partial class MainWindow : Window
         HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
+        Rebuild3DIfLinkedToExport();
     }
 
     private void NewExportDimensions_Changed(object sender, RoutedEventArgs e)
@@ -3512,6 +4160,7 @@ public partial class MainWindow : Window
         HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
+        Rebuild3DIfLinkedToExport();
     }
 
     private void NewExportDimensions_KeyDown(object sender, KeyEventArgs e)
@@ -3522,14 +4171,27 @@ public partial class MainWindow : Window
             {
                 _matchNativeExportResolution = false;
             }
-
-            if (ChkLockExportAspectRatio?.IsChecked == true && ReferenceEquals(sender, TxtNewExportWidth))
+            else if (ReferenceEquals(sender, TxtNewExportGridSize) && _matchNativeExportResolution)
             {
-                AdjustExportHeightForLockedAspectRatio();
+                ApplyNativeExportAreaResolutionToBoxes();
             }
 
+            if (ChkLockExportAspectRatio?.IsChecked == true)
+            {
+                if (ReferenceEquals(sender, TxtNewExportHeight))
+                {
+                    AdjustExportWidthForLockedAspectRatio();
+                }
+                else
+                {
+                    AdjustExportHeightForLockedAspectRatio();
+                }
+            }
+
+            HighlightSelectedResolutionButton();
             UpdateNewExportResolutionSummary();
             RenderExportAreaOverlay();
+            Rebuild3DIfLinkedToExport();
         }
     }
 
@@ -3542,15 +4204,19 @@ public partial class MainWindow : Window
         HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
+        Rebuild3DIfLinkedToExport();
     }
 
     private void TxtNewExportHeight_LostFocus(object sender, RoutedEventArgs e)
     {
         if (_isInitializing || _isSyncingExportResolutionBoxes) return;
         _matchNativeExportResolution = false;
+        if (ChkLockExportAspectRatio?.IsChecked == true)
+            AdjustExportWidthForLockedAspectRatio();
         HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
+        Rebuild3DIfLinkedToExport();
     }
 
     private void CmbExportResolutionPresetSet_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -3664,12 +4330,11 @@ public partial class MainWindow : Window
         _exportNormY0 = Math.Max(0.0, (1.0 - normH) * 0.5);
         _exportNormX1 = Math.Min(1.0, _exportNormX0 + normW);
         _exportNormY1 = Math.Min(1.0, _exportNormY0 + normH);
+        _customAreaIsSquareDrag = false;
 
         _isAuto3DZScale = true;
-        UpdateGlobalStatsDisplay();
-        UpdateExportAreaMetricsAndUi();
+        UpdateGlobalStatsDisplay(exactCalculation: true);
         RenderExportAreaOverlay();
-        Update2DScaleBar();
 
         double mpp = GetMetersPerPixelFromUi();
         double wM = _exportAreaStats.PixelWidth * mpp;
@@ -3708,6 +4373,7 @@ public partial class MainWindow : Window
         UpdateNewExportResolutionSummary();
         HighlightSelectedResolutionButton();
         RenderExportAreaOverlay();
+        Rebuild3DIfLinkedToExport();
     }
 
     private void BtnMultiplyResolution_Click(object sender, RoutedEventArgs e)
@@ -3736,6 +4402,7 @@ public partial class MainWindow : Window
         UpdateNewExportResolutionSummary();
         HighlightSelectedResolutionButton();
         RenderExportAreaOverlay();
+        Rebuild3DIfLinkedToExport();
     }
 
     private void BtnPresetResolution_Click(object sender, RoutedEventArgs e)
@@ -3765,21 +4432,12 @@ public partial class MainWindow : Window
             {
                 AdjustExportHeightForLockedAspectRatio();
             }
-
-            // If 1K, 2K, 4K, 8K, or 16K was clicked, also sync the 3D GPU Visualizer resolution dropdown
-            if (Cmb3DResolution != null)
-            {
-                if (presetDim == 1024) Cmb3DResolution.SelectedIndex = 0;
-                else if (presetDim == 2048) Cmb3DResolution.SelectedIndex = 1;
-                else if (presetDim == 4096) Cmb3DResolution.SelectedIndex = 2;
-                else if (presetDim == 8192) Cmb3DResolution.SelectedIndex = 3;
-                else if (presetDim == 16384) Cmb3DResolution.SelectedIndex = 4;
-            }
         }
 
         HighlightSelectedResolutionButton();
         UpdateNewExportResolutionSummary();
         RenderExportAreaOverlay();
+        Rebuild3DIfLinkedToExport();
     }
 
     private void ChkLockExportAspectRatio_Changed(object sender, RoutedEventArgs e)
@@ -3790,6 +4448,7 @@ public partial class MainWindow : Window
             AdjustExportHeightForLockedAspectRatio();
             UpdateNewExportResolutionSummary();
             RenderExportAreaOverlay();
+            Rebuild3DIfLinkedToExport();
         }
     }
 
@@ -3851,12 +4510,32 @@ public partial class MainWindow : Window
         string suffix = TxtExportSuffix.Text?.Trim() ?? string.Empty;
         bool tiffFloat32 = (CmbExportFileFormat?.SelectedIndex ?? 0) == 1;
 
-        _cts?.Dispose();
+        _cts?.Cancel();
         _cts = new CancellationTokenSource();
         CancellationToken token = _cts.Token;
 
         try
         {
+            // Auto-apply pending interpolation passes before exporting if Interpolated fill is active
+            int targetPasses = (int)Math.Round(SldIterations?.Value ?? 10);
+            if (targetPasses != _appliedInterpolationIterations &&
+                (RbFillInterpolated?.IsChecked == true || _tiles.Any(t => t.FillOverride == TileFillModeOverride.Interpolated)))
+            {
+                TxtStatusBar.Text = $"Auto-applying pending interpolation passes ({targetPasses}) before export...";
+                await RunProcessingPipelineCoreAsync(token);
+            }
+
+            // Auto-apply pending seam smoothing before exporting so exported heightmaps match the UI slider
+            int targetSmoothingSteps = (int)Math.Round(SldSeamSmoothingSteps?.Value ?? 0);
+            if (_tiles.Count > 1 && targetSmoothingSteps != _appliedSeamSmoothingSteps)
+            {
+                TxtStatusBar.Text = $"Auto-applying pending seam smoothing ({targetSmoothingSteps} steps) before export...";
+                await ApplySeamSmoothingOnlyAsync();
+            }
+
+            // Ensure exact un-strided elevation stats and normalization ranges prior to export
+            UpdateExportAreaMetricsAndUi(exactCalculation: true);
+
             string formatLabel = exportAsTiff
                 ? (tiffFloat32 ? "32-Bit Float GeoTIFF" : "16-Bit Normalized GeoTIFF")
                 : "16-Bit Normalized PNG";
@@ -4032,15 +4711,221 @@ public partial class MainWindow : Window
 
     private int GetSelected3DGpuResolution()
     {
-        return (Cmb3DResolution?.SelectedIndex ?? 1) switch
+        int idx = Cmb3DResolution?.SelectedIndex ?? 0;
+        if (idx == 0) // Match Export Resolution
         {
-            0 => 1024,
-            1 => 2048,
-            2 => 4096,
-            3 => 8192,
-            4 => 16384,
-            _ => 2048
+            var (rows, cols) = GetNewExportGridDimensionsFromUi();
+            var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+            int totalW = Math.Max(1, fileW * cols);
+            int totalH = Math.Max(1, fileH * rows);
+            return Math.Max(totalW, totalH);
+        }
+        else if (idx == 1) // Match Source DEM
+        {
+            int srcW = _exportAreaStats.PixelWidth > 0 ? _exportAreaStats.PixelWidth : 2048;
+            int srcH = _exportAreaStats.PixelHeight > 0 ? _exportAreaStats.PixelHeight : 2048;
+            return Math.Max(srcW, srcH);
+        }
+        else
+        {
+            return idx switch
+            {
+                2 => 1024,
+                3 => 2048,
+                4 => 4096,
+                5 => 8192,
+                6 => 16384,
+                _ => 2048
+            };
+        }
+    }
+
+    private void Update3DResolutionDropdownLabels()
+    {
+        var (rows, cols) = GetNewExportGridDimensionsFromUi();
+        var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+        int totalExportW = fileW * cols;
+        int totalExportH = fileH * rows;
+
+        int srcW = _exportAreaStats.PixelWidth > 0 ? _exportAreaStats.PixelWidth : 2048;
+        int srcH = _exportAreaStats.PixelHeight > 0 ? _exportAreaStats.PixelHeight : 2048;
+
+        if (Cbi3DResMatchExport != null)
+        {
+            Cbi3DResMatchExport.Content = $"Match Export ({totalExportW}×{totalExportH})";
+        }
+        if (Cbi3DResMatchSource != null)
+        {
+            Cbi3DResMatchSource.Content = $"Match Source ({srcW}×{srcH})";
+        }
+
+        Update3DResolutionInterplayHints();
+    }
+
+    private void Update3DResolutionInterplayHints()
+    {
+        var (rows, cols) = GetNewExportGridDimensionsFromUi();
+        var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+        int totalExportW = fileW * cols;
+        int totalExportH = fileH * rows;
+        int maxExportPx = Math.Max(totalExportW, totalExportH);
+
+        int srcW = _exportAreaStats.PixelWidth > 0 ? _exportAreaStats.PixelWidth : 2048;
+        int srcH = _exportAreaStats.PixelHeight > 0 ? _exportAreaStats.PixelHeight : 2048;
+
+        int selectedRes = GetSelected3DGpuResolution();
+        int gpuTexDim = Math.Min(selectedRes, 8192);
+        int meshSegs = selectedRes switch
+        {
+            <= 1024 => 256,
+            <= 2048 => 512,
+            <= 4096 => 768,
+            _ => 1024
         };
+        int selectedIdx = Cmb3DResolution?.SelectedIndex ?? 0;
+
+        // 1. Interplay hint under Cmb3DResolution in the 3D options panel
+        if (Txt3DResInterplayHint != null)
+        {
+            if (selectedIdx == 0)
+            {
+                Txt3DResInterplayHint.Text = $"✓ Linked to Export ({totalExportW}×{totalExportH} px)";
+                Txt3DResInterplayHint.Foreground = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+                if (Txt3DResInterplayTooltipTitle != null)
+                    Txt3DResInterplayTooltipTitle.Text = $"3D vs. Export: Linked ({totalExportW} × {totalExportH} px)";
+                if (Txt3DResInterplayTooltipDesc != null)
+                    Txt3DResInterplayTooltipDesc.Text = $"The 3D viewport automatically matches your target export resolution ({gpuTexDim}×{gpuTexDim} GPU texture • {meshSegs}×{meshSegs} mesh quads).";
+            }
+            else if (selectedIdx == 1)
+            {
+                Txt3DResInterplayHint.Text = $"● 1:1 Native Source ({srcW}×{srcH} px)";
+                Txt3DResInterplayHint.Foreground = (Brush)Resources["ThemeAccentPrimary"] ?? Brushes.Cyan;
+                if (Txt3DResInterplayTooltipTitle != null)
+                    Txt3DResInterplayTooltipTitle.Text = $"3D vs. Source: Native Source ({srcW} × {srcH} px)";
+                if (Txt3DResInterplayTooltipDesc != null)
+                    Txt3DResInterplayTooltipDesc.Text = $"The 3D viewport targets your native source DEM resolution ({gpuTexDim}×{gpuTexDim} GPU texture • {meshSegs}×{meshSegs} mesh quads), decoupled from export.";
+            }
+            else
+            {
+                double expRatio = (double)selectedRes / Math.Max(1, maxExportPx);
+                if (Math.Abs(expRatio - 1.0) < 0.05)
+                {
+                    Txt3DResInterplayHint.Text = $"✓ Matches Export ({selectedRes} px)";
+                    Txt3DResInterplayHint.Foreground = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+                    if (Txt3DResInterplayTooltipTitle != null)
+                        Txt3DResInterplayTooltipTitle.Text = $"3D vs. Export: 1:1 Match ({selectedRes} px)";
+                }
+                else if (expRatio > 1.05)
+                {
+                    Txt3DResInterplayHint.Text = $"▲ {expRatio:0.##}× Higher than Export";
+                    Txt3DResInterplayHint.Foreground = (Brush)Resources["ThemeAccentWarning"] ?? Brushes.Orange;
+                    if (Txt3DResInterplayTooltipTitle != null)
+                        Txt3DResInterplayTooltipTitle.Text = $"3D vs. Export: Higher than Export ({expRatio:0.##}×)";
+                }
+                else
+                {
+                    Txt3DResInterplayHint.Text = $"▼ {expRatio:0.##}× Lighter than Export";
+                    Txt3DResInterplayHint.Foreground = (Brush)Resources["ThemeAccentPrimary"] ?? Brushes.Cyan;
+                    if (Txt3DResInterplayTooltipTitle != null)
+                        Txt3DResInterplayTooltipTitle.Text = $"3D vs. Export: Lighter than Export ({expRatio:0.##}×)";
+                }
+                if (Txt3DResInterplayTooltipDesc != null)
+                    Txt3DResInterplayTooltipDesc.Text = $"3D viewport tier: {selectedRes} px ({gpuTexDim}×{gpuTexDim} GPU texture • {meshSegs}×{meshSegs} mesh quads) vs. Export target ({totalExportW} × {totalExportH} px).";
+            }
+        }
+
+        // 2. Side Panel Section 4: 3D preview sync status
+        if (Txt3DPreviewLinkStatus != null && Txt3DPreviewLinkDetail != null && BtnLink3DToExport != null)
+        {
+            if (selectedIdx == 0)
+            {
+                Txt3DPreviewLinkStatus.Text = $"3D Preview: Linked to Export ({totalExportW} × {totalExportH} px)";
+                Txt3DPreviewLinkStatus.Foreground = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+                Txt3DPreviewLinkDetail.Text = $"GPU Texture: {gpuTexDim}×{gpuTexDim} px • Mesh: {meshSegs}×{meshSegs} quads (auto-updates with export)";
+                BtnLink3DToExport.Visibility = Visibility.Collapsed;
+                if (Txt3DPreviewLinkTooltipTitle != null)
+                    Txt3DPreviewLinkTooltipTitle.Text = "3D Preview: Linked to Export Resolution";
+                if (Txt3DPreviewLinkTooltipDesc != null)
+                    Txt3DPreviewLinkTooltipDesc.Text = $"The 3D Visualizer automatically tracks your Export Width × Height ({totalExportW} × {totalExportH} px).";
+            }
+            else
+            {
+                string shortTag = selectedIdx switch
+                {
+                    1 => "Native Source",
+                    2 => "1K",
+                    3 => "2K",
+                    4 => "4K",
+                    5 => "8K",
+                    _ => "16K"
+                };
+                Txt3DPreviewLinkStatus.Text = $"3D Preview: Decoupled ({shortTag} Tier)";
+                Txt3DPreviewLinkStatus.Foreground = (Brush)Resources["ThemeAccentWarning"] ?? Brushes.Orange;
+                Txt3DPreviewLinkDetail.Text = $"GPU Texture: {gpuTexDim}×{gpuTexDim} px • Mesh: {meshSegs}×{meshSegs} quads (Export is {totalExportW} × {totalExportH} px)";
+                BtnLink3DToExport.Visibility = Visibility.Visible;
+                if (Txt3DPreviewLinkTooltipTitle != null)
+                    Txt3DPreviewLinkTooltipTitle.Text = $"3D Preview: Decoupled ({shortTag} Override)";
+                if (Txt3DPreviewLinkTooltipDesc != null)
+                    Txt3DPreviewLinkTooltipDesc.Text = $"The 3D Visualizer is manually set to {shortTag} ({gpuTexDim}×{gpuTexDim} GPU texture, {meshSegs}×{meshSegs} mesh quads) independently of your {totalExportW} × {totalExportH} px export target. Click 'Link to Export' to resynchronize.";
+            }
+        }
+
+        // 3. Scale Matrix Panel
+        if (TxtMatrix3DPreviewSync != null)
+        {
+            if (selectedIdx == 0)
+            {
+                TxtMatrix3DPreviewSync.Text = $"3D vs. Export: Linked ({gpuTexDim} px tex / {meshSegs} quads)";
+                TxtMatrix3DPreviewSync.Foreground = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+                if (TxtMatrix3DPreviewSyncTooltipTitle != null)
+                    TxtMatrix3DPreviewSyncTooltipTitle.Text = "3D vs. Export: Linked to Export Resolution";
+            }
+            else
+            {
+                double expRatio = (double)selectedRes / Math.Max(1, maxExportPx);
+                if (Math.Abs(expRatio - 1.0) < 0.05)
+                {
+                    TxtMatrix3DPreviewSync.Text = $"3D vs. Export: Matches ({gpuTexDim} px tex / {meshSegs} quads)";
+                    TxtMatrix3DPreviewSync.Foreground = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+                    if (TxtMatrix3DPreviewSyncTooltipTitle != null)
+                        TxtMatrix3DPreviewSyncTooltipTitle.Text = $"3D vs. Export: Matches Export ({selectedRes} px)";
+                }
+                else
+                {
+                    TxtMatrix3DPreviewSync.Text = $"3D vs. Export: {expRatio:0.##}× ({gpuTexDim} px tex / {meshSegs} quads)";
+                    TxtMatrix3DPreviewSync.Foreground = (Brush)Resources["ThemeAccentWarning"] ?? Brushes.Orange;
+                    if (TxtMatrix3DPreviewSyncTooltipTitle != null)
+                        TxtMatrix3DPreviewSyncTooltipTitle.Text = $"3D vs. Export: Decoupled ({expRatio:0.##}× of Export)";
+                }
+            }
+            if (TxtMatrix3DPreviewSyncTooltipDesc != null)
+            {
+                TxtMatrix3DPreviewSyncTooltipDesc.Text = $"3D GPU Texture: {gpuTexDim} × {gpuTexDim} px • 3D Mesh Grid: {meshSegs} × {meshSegs} quads ({meshSegs * meshSegs:N0} total quads) vs. Export Target: {totalExportW} × {totalExportH} px.";
+            }
+        }
+    }
+
+    private async void BtnLink3DToExport_Click(object sender, RoutedEventArgs e)
+    {
+        if (Cmb3DResolution != null)
+        {
+            _isSyncing3DResolutionCombo = true;
+            try
+            {
+                Cmb3DResolution.SelectedIndex = 0; // Match Export Resolution
+            }
+            finally
+            {
+                _isSyncing3DResolutionCombo = false;
+            }
+        }
+        Update3DResolutionDropdownLabels();
+        UpdateDynamicScaleMatrix();
+        if (RbView3D?.IsChecked == true && _tiles.Count > 0)
+        {
+            await Rebuild3DVisualizerAsync(forceMeshRebuild: true);
+        }
+        TxtStatusBar.Text = "Linked 3D preview resolution to match Export settings.";
     }
 
     private TerrainShadingMode GetSelected3DShadingMode()
@@ -4056,14 +4941,17 @@ public partial class MainWindow : Window
 
     private async void Cmb3DResolution_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isInitializing || RbView3D?.IsChecked != true || _tiles.Count == 0) return;
-        await Rebuild3DVisualizerAsync();
+        if (_isInitializing || _isSyncing3DResolutionCombo) return;
+        Update3DResolutionDropdownLabels();
+        UpdateDynamicScaleMatrix();
+        if (RbView3D?.IsChecked != true || _tiles.Count == 0) return;
+        await Rebuild3DVisualizerAsync(forceMeshRebuild: true);
     }
 
     private async void Cmb3DShading_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_isInitializing || RbView3D?.IsChecked != true || _tiles.Count == 0) return;
-        await Rebuild3DVisualizerAsync();
+        await Rebuild3DVisualizerAsync(forceMeshRebuild: false);
     }
 
     private async void Preview3DOption_Changed(object sender, RoutedEventArgs e)
@@ -4073,7 +4961,25 @@ public partial class MainWindow : Window
             Bdr3DWaterSliders.Visibility = Chk3DSimulateWater?.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         }
         if (_isInitializing || RbView3D?.IsChecked != true || _tiles.Count == 0) return;
-        await Rebuild3DVisualizerAsync();
+
+        // If toggling only the scale grid overlay and mesh assets are already built, update material instantly
+        if (sender == Chk3DOverlayScaleGrid && _current3DAssets != null && Model3DTerrain?.Geometry != null)
+        {
+            double mpp = GetMetersPerPixelFromUi();
+            double zoneW = Math.Max(1.0, _exportAreaStats.PixelWidth * mpp);
+            double zoneH = Math.Max(1.0, _exportAreaStats.PixelHeight * mpp);
+
+            double fovRad = 44.0 * (Math.PI / 180.0);
+            double visibleWorldWidth = 2.0 * _camDistance * Math.Tan(fovRad * 0.5);
+            double metersPerWorldUnit = zoneW / 2.0;
+            double visibleSpanMeters = visibleWorldWidth * metersPerWorldUnit;
+
+            _lastGridIncrementMeters = GetDynamicScaleGridIncrement(visibleSpanMeters);
+            Apply3DScaleGridMaterial(zoneW, zoneH, _lastGridIncrementMeters);
+            return;
+        }
+
+        await Rebuild3DVisualizerAsync(forceMeshRebuild: false);
     }
 
     private void Sld3DWaterParam_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -4100,7 +5006,7 @@ public partial class MainWindow : Window
                 _waterSliderDebounceTimer.Stop();
                 if (RbView3D?.IsChecked == true && _tiles.Count > 0)
                 {
-                    await Rebuild3DVisualizerAsync();
+                    await Rebuild3DVisualizerAsync(forceMeshRebuild: false);
                 }
             };
         }
@@ -4130,8 +5036,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Automatically derives the 3D Z-Scale (Height-to-Width ratio = ΔZ / Width) from the physical
-    /// width and elevation range of either the global grid or the selected custom export zone.
+    /// Automatically derives the 3D Z-Scale (Height-to-Width ratio = ΔZ / MaxSpan) and horizontal
+    /// aspect ratio (ScaleX / ScaleZ) from the physical dimensions and elevation range of the active zone.
     /// </summary>
     private void UpdateAuto3DZScaleFromActiveZone()
     {
@@ -4139,7 +5045,11 @@ public partial class MainWindow : Window
 
         if (_tiles.Count == 0)
         {
+            Scale3DTerrain.ScaleX = 1.0;
+            Scale3DTerrain.ScaleZ = 1.0;
             Scale3DTerrain.ScaleY = 0.2;
+            Scale3DSkirt.ScaleX = 1.0;
+            Scale3DSkirt.ScaleZ = 1.0;
             Scale3DSkirt.ScaleY = 0.2;
             if (Txt3DZScaleRatio != null)
                 Txt3DZScaleRatio.Text = "0.200";
@@ -4148,8 +5058,19 @@ public partial class MainWindow : Window
 
         var (normMin, normMax) = GetEffectiveNormalizationRange();
         double deltaZMeters = Math.Max(0.0, normMax - normMin);
-        double widthMeters = Math.Max(1.0, _exportAreaStats.PixelWidth * GetMetersPerPixelFromUi());
-        double ratio = deltaZMeters / widthMeters;
+        double mpp = GetMetersPerPixelFromUi();
+        double widthMeters = Math.Max(1.0, _exportAreaStats.PixelWidth * mpp);
+        double heightMeters = Math.Max(1.0, _exportAreaStats.PixelHeight * mpp);
+        double maxSpanMeters = Math.Max(widthMeters, heightMeters);
+
+        double scaleX = widthMeters / maxSpanMeters;
+        double scaleZ = heightMeters / maxSpanMeters;
+        Scale3DTerrain.ScaleX = scaleX;
+        Scale3DTerrain.ScaleZ = scaleZ;
+        Scale3DSkirt.ScaleX = scaleX;
+        Scale3DSkirt.ScaleZ = scaleZ;
+
+        double ratio = deltaZMeters / maxSpanMeters;
 
         double appliedScaleY = Math.Clamp(ratio, 0.002, 10.0);
         Scale3DTerrain.ScaleY = appliedScaleY;
@@ -4171,6 +5092,15 @@ public partial class MainWindow : Window
             userRatio > 0)
         {
             _isAuto3DZScale = false;
+            double mpp = GetMetersPerPixelFromUi();
+            double widthMeters = Math.Max(1.0, _exportAreaStats.PixelWidth * mpp);
+            double heightMeters = Math.Max(1.0, _exportAreaStats.PixelHeight * mpp);
+            double maxSpanMeters = Math.Max(widthMeters, heightMeters);
+            Scale3DTerrain.ScaleX = widthMeters / maxSpanMeters;
+            Scale3DTerrain.ScaleZ = heightMeters / maxSpanMeters;
+            Scale3DSkirt.ScaleX = widthMeters / maxSpanMeters;
+            Scale3DSkirt.ScaleZ = heightMeters / maxSpanMeters;
+
             double clamped = Math.Clamp(userRatio, 0.001, 10.0);
             Scale3DTerrain.ScaleY = clamped;
             Scale3DSkirt.ScaleY = clamped;
@@ -4251,6 +5181,7 @@ public partial class MainWindow : Window
         Cam3D.UpDirection = new Vector3D(0, 1, 0);
 
         Update3DScaleBar();
+        Update3DScaleGridOnCameraChange();
     }
 
     private void Grd3DVisualizer_MouseDown(object sender, MouseButtonEventArgs e)
@@ -4325,12 +5256,11 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private async Task Rebuild3DVisualizerAsync()
+    private async Task Rebuild3DVisualizerAsync(bool forceMeshRebuild = false)
     {
         if (_tiles.Count == 0 || Model3DTerrain == null || Model3DSkirt == null) return;
 
         _cts3D?.Cancel();
-        _cts3D?.Dispose();
         _cts3D = new CancellationTokenSource();
         CancellationToken token = _cts3D.Token;
 
@@ -4341,7 +5271,7 @@ public partial class MainWindow : Window
             2048 => "2K (2048 × 2048)",
             4096 => "4K (4096 × 4096)",
             8192 => "8K (8192 × 8192)",
-            _ => "16K (16384 × 16384)"
+            _ => "16K Tier (8192px Tex / 1024² Mesh)"
         };
 
         TerrainShadingMode shadingMode = GetSelected3DShadingMode();
@@ -4357,69 +5287,122 @@ public partial class MainWindow : Window
         double ax1 = _exportNormX1;
         double ay1 = _exportNormY1;
 
+        bool meshNeedsRebuild = forceMeshRebuild ||
+            _current3DAssets == null ||
+            Model3DTerrain.Geometry == null ||
+            Model3DSkirt.Geometry == null ||
+            _last3DMeshRes != res ||
+            Math.Abs(_last3DNormX0 - ax0) > 1e-5 ||
+            Math.Abs(_last3DNormY0 - ay0) > 1e-5 ||
+            Math.Abs(_last3DNormX1 - ax1) > 1e-5 ||
+            Math.Abs(_last3DNormY1 - ay1) > 1e-5 ||
+            _last3DShowProcessed != showProcessed ||
+            float.IsNaN(_last3DNormMin) ||
+            float.IsNaN(_last3DNormMax) ||
+            Math.Abs(_last3DNormMin - normMin) > 1e-4f ||
+            Math.Abs(_last3DNormMax - normMax) > 1e-4f;
+
         try
         {
-            if (Bdr3DLoadingOverlay != null && Txt3DLoadingMessage != null)
-            {
-                Txt3DLoadingMessage.Text = $"Rendering GPU 3D Heightmap @ {resTag}...";
-                Bdr3DLoadingOverlay.Visibility = Visibility.Visible;
-            }
-
             if (_isAuto3DZScale)
             {
                 UpdateAuto3DZScaleFromActiveZone();
             }
+            else
+            {
+                Apply3DZScaleFromTextBox();
+            }
 
             var mosaic = DemProcessor.BuildMosaicDescriptor(_tiles, _globalMin);
 
-            Heightmap3DAssets assets = await Task.Run(() =>
-                DemProcessor.Build3DHeightmapAssets(
-                    mosaic,
-                    ax0,
-                    ay0,
-                    ax1,
-                    ay1,
-                    res,
-                    normMin,
-                    normMax,
-                    showProcessed,
-                    shadingMode,
-                    simulateWater,
-                    highlightQuadEdges,
-                    waterSlopeLimit,
-                    waterAltitudeLimit,
-                    token), token);
+            MeshGeometry3D terrainMesh;
+            MeshGeometry3D skirtMesh;
+            int meshDim;
+            BitmapSource textureBitmap;
 
-            token.ThrowIfCancellationRequested();
-
-            var imgBrush = new ImageBrush(assets.TextureBitmap)
+            if (meshNeedsRebuild)
             {
-                ViewportUnits = BrushMappingMode.Absolute
-            };
-            RenderOptions.SetBitmapScalingMode(imgBrush, BitmapScalingMode.Linear);
-            imgBrush.Freeze();
+                if (Bdr3DLoadingOverlay != null && Txt3DLoadingMessage != null)
+                {
+                    Txt3DLoadingMessage.Text = $"Building 3D Mesh & Texture @ {resTag}...";
+                    Bdr3DLoadingOverlay.Visibility = Visibility.Visible;
+                }
 
-            var mat = new DiffuseMaterial(imgBrush);
-            mat.Freeze();
+                var meshTask = Task.Run(() =>
+                    DemProcessor.Build3DHeightmapMesh(
+                        mosaic, ax0, ay0, ax1, ay1, res, normMin, normMax, showProcessed, token), token);
 
-            var backBrush = new SolidColorBrush(Color.FromRgb(38, 32, 26));
-            backBrush.Freeze();
-            var backMat = new DiffuseMaterial(backBrush);
-            backMat.Freeze();
+                var texTask = Task.Run(() =>
+                    DemProcessor.Build3DHeightmapTexture(
+                        mosaic, ax0, ay0, ax1, ay1, res, normMin, normMax, showProcessed, shadingMode, simulateWater, highlightQuadEdges, waterSlopeLimit, waterAltitudeLimit, token), token);
 
-            Model3DTerrain.Geometry = assets.TerrainMesh;
-            Model3DTerrain.Material = mat;
-            Model3DTerrain.BackMaterial = backMat;
+                await Task.WhenAll(meshTask, texTask);
+                token.ThrowIfCancellationRequested();
 
-            Model3DSkirt.Geometry = assets.SkirtMesh;
+                var meshResult = await meshTask;
+                terrainMesh = meshResult.TerrainMesh;
+                skirtMesh = meshResult.SkirtMesh;
+                meshDim = meshResult.MeshDim;
+                textureBitmap = await texTask;
 
-            string areaTag = IsCustomExportAreaActive ? "Custom Selected Zone" : "Full Global Grid";
-            int quadCount = assets.TerrainMesh.TriangleIndices.Count / 6;
-            if (Txt3DGpuHudTitle != null)
-            {
-                Txt3DGpuHudTitle.Text = $"GPU 3D HEIGHTMAP • {resTag} ({quadCount:N0} quads) • {areaTag} [{normMin:F1}m .. {normMax:F1}m]";
+                Model3DTerrain.Geometry = terrainMesh;
+                Model3DSkirt.Geometry = skirtMesh;
+
+                var backBrush = new SolidColorBrush(Color.FromRgb(38, 32, 26));
+                backBrush.Freeze();
+                var backMat = new DiffuseMaterial(backBrush);
+                backMat.Freeze();
+                Model3DTerrain.BackMaterial = backMat;
+
+                _last3DNormX0 = ax0;
+                _last3DNormY0 = ay0;
+                _last3DNormX1 = ax1;
+                _last3DNormY1 = ay1;
+                _last3DMeshRes = res;
+                _last3DShowProcessed = showProcessed;
+                _last3DNormMin = normMin;
+                _last3DNormMax = normMax;
             }
+            else
+            {
+                if (Bdr3DLoadingOverlay != null && Txt3DLoadingMessage != null)
+                {
+                    Txt3DLoadingMessage.Text = $"Updating 3D Terrain Shader ({shadingMode})...";
+                    Bdr3DLoadingOverlay.Visibility = Visibility.Visible;
+                }
+
+                terrainMesh = (MeshGeometry3D)Model3DTerrain.Geometry!;
+                skirtMesh = (MeshGeometry3D)Model3DSkirt.Geometry!;
+                meshDim = _current3DAssets!.MeshGridDimension;
+
+                textureBitmap = await Task.Run(() =>
+                    DemProcessor.Build3DHeightmapTexture(
+                        mosaic, ax0, ay0, ax1, ay1, res, normMin, normMax, showProcessed, shadingMode, simulateWater, highlightQuadEdges, waterSlopeLimit, waterAltitudeLimit, token), token);
+                token.ThrowIfCancellationRequested();
+            }
+
+            _current3DAssets = new Heightmap3DAssets(
+                terrainMesh,
+                skirtMesh,
+                textureBitmap,
+                res,
+                meshDim,
+                normMin,
+                normMax);
+
+            double mpp = GetMetersPerPixelFromUi();
+            double zoneW = Math.Max(1.0, _exportAreaStats.PixelWidth * mpp);
+            double zoneH = Math.Max(1.0, _exportAreaStats.PixelHeight * mpp);
+
+            double fovRad = 44.0 * (Math.PI / 180.0);
+            double visibleWorldWidth = 2.0 * _camDistance * Math.Tan(fovRad * 0.5);
+            double metersPerWorldUnit = zoneW / 2.0;
+            double visibleSpanMeters = visibleWorldWidth * metersPerWorldUnit;
+            _lastGridIncrementMeters = GetDynamicScaleGridIncrement(visibleSpanMeters);
+
+            Apply3DScaleGridMaterial(zoneW, zoneH, _lastGridIncrementMeters);
             Update3DScaleBar();
+            UpdateDynamicScaleMatrix();
         }
         catch (OperationCanceledException)
         {
@@ -4427,13 +5410,218 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            TxtStatusBar.Text = $"3D GPU Visualizer error: {ex.Message}";
+            TxtStatusBar.Text = $"3D Visualizer error: {ex.Message}";
         }
         finally
         {
             if (!token.IsCancellationRequested && Bdr3DLoadingOverlay != null)
             {
                 Bdr3DLoadingOverlay.Visibility = Visibility.Collapsed;
+            }
+        }
+    }
+
+    private static double GetDynamicScaleGridIncrement(double visibleSpanMeters)
+    {
+        double target = Math.Max(1.0, visibleSpanMeters / 10.0);
+        double bestInc = ScaleGridIncrements[0];
+        double bestDist = double.MaxValue;
+        foreach (double inc in ScaleGridIncrements)
+        {
+            double dist = Math.Abs(Math.Log10(inc) - Math.Log10(target));
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestInc = inc;
+            }
+        }
+        return bestInc;
+    }
+
+    private void Apply3DScaleGridMaterial(double zoneW, double zoneH, double incM)
+    {
+        if (Model3DTerrain == null || _current3DAssets == null) return;
+
+        bool overlayScaleGrid = Chk3DOverlayScaleGrid?.IsChecked == true;
+
+        var baseImgBrush = new ImageBrush(_current3DAssets.TextureBitmap)
+        {
+            ViewportUnits = BrushMappingMode.Absolute
+        };
+        RenderOptions.SetBitmapScalingMode(baseImgBrush, BitmapScalingMode.Linear);
+        baseImgBrush.Freeze();
+
+        var diffuseMat = new DiffuseMaterial(baseImgBrush);
+        diffuseMat.Freeze();
+
+        if (!overlayScaleGrid || incM <= 0.0)
+        {
+            Model3DTerrain.Material = diffuseMat;
+            Update3DHudTitle();
+            return;
+        }
+
+        double tileU = Math.Clamp(incM / zoneW, 0.00001, 1.0);
+        double tileV = Math.Clamp(incM / zoneH, 0.00001, 1.0);
+
+        var gridBrush = new ImageBrush(_scaleGridTileBitmap)
+        {
+            Viewport = new Rect(0, 0, tileU, tileV),
+            ViewportUnits = BrushMappingMode.RelativeToBoundingBox,
+            TileMode = TileMode.Tile
+        };
+        RenderOptions.SetBitmapScalingMode(gridBrush, BitmapScalingMode.Linear);
+        gridBrush.Freeze();
+
+        var gridMat = new EmissiveMaterial(gridBrush);
+        gridMat.Freeze();
+
+        var matGroup = new MaterialGroup();
+        matGroup.Children.Add(diffuseMat);
+        matGroup.Children.Add(gridMat);
+        matGroup.Freeze();
+
+        Model3DTerrain.Material = matGroup;
+        Update3DHudTitle();
+    }
+
+    private void Update3DScaleGridOnCameraChange()
+    {
+        bool overlayScaleGrid = Chk3DOverlayScaleGrid?.IsChecked == true;
+        if (!overlayScaleGrid || _tiles.Count == 0 || Model3DTerrain == null || _current3DAssets == null)
+        {
+            Update3DScaleBar();
+            return;
+        }
+
+        double mpp = GetMetersPerPixelFromUi();
+        double zoneW = Math.Max(1.0, _exportAreaStats.PixelWidth * mpp);
+        double zoneH = Math.Max(1.0, _exportAreaStats.PixelHeight * mpp);
+
+        double fovRad = 44.0 * (Math.PI / 180.0);
+        double visibleWorldWidth = 2.0 * _camDistance * Math.Tan(fovRad * 0.5);
+        double metersPerWorldUnit = zoneW / 2.0;
+        double visibleSpanMeters = visibleWorldWidth * metersPerWorldUnit;
+
+        double newInc = GetDynamicScaleGridIncrement(visibleSpanMeters);
+        if (Math.Abs(newInc - _lastGridIncrementMeters) > 1e-4)
+        {
+            _lastGridIncrementMeters = newInc;
+            Apply3DScaleGridMaterial(zoneW, zoneH, newInc);
+        }
+
+        Update3DScaleBar();
+    }
+
+    private void Update3DHudTitle()
+    {
+        if (_current3DAssets == null) return;
+        int res = _current3DAssets.TextureResolution;
+        int gpuTexDim = Math.Min(res, 8192);
+        string resTag = res switch
+        {
+            <= 1024 => "1K (1024×1024 px)",
+            <= 2048 => "2K (2048×2048 px)",
+            <= 4096 => "4K (4096×4096 px)",
+            <= 8192 => "8K (8192×8192 px)",
+            _ => "16K Tier (8192×8192 GPU Tex)"
+        };
+        string areaTag = IsCustomExportAreaActive ? "Custom Zone" : "Full Mosaic";
+        int quadCount = _current3DAssets.TerrainMesh.TriangleIndices.Count / 6;
+        int meshDim = _current3DAssets.MeshGridDimension;
+        int meshSegs = meshDim > 1 ? meshDim - 1 : (int)Math.Round(Math.Sqrt(quadCount));
+        if (meshSegs <= 0) meshSegs = 1;
+
+        var (normMin, normMax) = GetEffectiveNormalizationRange();
+        double mpp = GetMetersPerPixelFromUi();
+        double activeZoneWidthMeters = Math.Max(1.0, _exportAreaStats.PixelWidth * mpp);
+        double texStepMeters = activeZoneWidthMeters / gpuTexDim;
+        double quadStepMeters = activeZoneWidthMeters / meshSegs;
+
+        // 1. Mesh & Texture technical specs
+        if (Txt3DGpuHudTitle != null)
+        {
+            Txt3DGpuHudTitle.Text = $"GPU Texture: {resTag} (~{FormatMetricDistance(texStepMeters)}/px) • 3D Mesh: {meshSegs}×{meshSegs} ({quadCount:N0} quads)";
+        }
+        if (Txt3DQuadElevationInfo != null)
+        {
+            Txt3DQuadElevationInfo.Text = $"Mesh Step: ~{FormatMetricDistance(quadStepMeters)}/quad • {areaTag} [{normMin:F1}m .. {normMax:F1}m] (ΔZ: {normMax - normMin:F1}m)";
+        }
+
+        // 2. Export Resolution Parity Comparison (3D Preview vs Export Target)
+        var (rows, cols) = GetNewExportGridDimensionsFromUi();
+        var (fileW, fileH) = GetNewExportFileResolutionFromUi();
+        int totalExportW = fileW * cols;
+        int totalExportH = fileH * rows;
+        int maxExportPx = Math.Max(totalExportW, totalExportH);
+        double expRatio = (double)gpuTexDim / Math.Max(1, maxExportPx);
+
+        if (Bdr3DExportParityBadge != null && Txt3DExportParityBadge != null && Txt3DExportParityDesc != null)
+        {
+            if (Math.Abs(expRatio - 1.0) < 0.05 || (Cmb3DResolution?.SelectedIndex == 0 && maxExportPx <= 8192))
+            {
+                Bdr3DExportParityBadge.Background = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+                Txt3DExportParityBadge.Text = "✓ 3D vs. EXPORT: LINKED";
+                Txt3DExportParityDesc.Text = $"3D texture ({gpuTexDim} px) & mesh ({meshSegs}² quads) represent export target ({totalExportW} × {totalExportH} px).";
+                if (Txt3DExportParityTooltipTitle != null)
+                    Txt3DExportParityTooltipTitle.Text = $"3D vs. Export: Matched ({totalExportW} × {totalExportH} px)";
+            }
+            else if (expRatio > 1.05)
+            {
+                Bdr3DExportParityBadge.Background = (Brush)Resources["ThemeAccentWarning"] ?? Brushes.Orange;
+                Txt3DExportParityBadge.Text = $"▲ 3D vs. EXPORT ({expRatio:0.##}×)";
+                Txt3DExportParityDesc.Text = $"3D texture ({gpuTexDim} px) is higher resolution than export target ({totalExportW} × {totalExportH} px).";
+                if (Txt3DExportParityTooltipTitle != null)
+                    Txt3DExportParityTooltipTitle.Text = $"3D vs. Export: Higher than Export ({expRatio:0.##}×)";
+            }
+            else
+            {
+                Bdr3DExportParityBadge.Background = (Brush)Resources["ThemeAccentPrimary"] ?? Brushes.Cyan;
+                Txt3DExportParityBadge.Text = $"▼ 3D vs. EXPORT ({expRatio:0.##}×)";
+                Txt3DExportParityDesc.Text = $"3D texture ({gpuTexDim} px) is lighter than export target ({totalExportW} × {totalExportH} px) for GPU speed.";
+                if (Txt3DExportParityTooltipTitle != null)
+                    Txt3DExportParityTooltipTitle.Text = $"3D vs. Export: Lighter than Export ({expRatio:0.##}×)";
+            }
+            if (Txt3DExportParityTooltipDesc != null)
+            {
+                Txt3DExportParityTooltipDesc.Text = $"Compares the 3D viewport GPU texture ({gpuTexDim} × {gpuTexDim} px, ~{FormatMetricDistance(texStepMeters)}/px) and 3D mesh ({meshSegs} × {meshSegs} quads, ~{FormatMetricDistance(quadStepMeters)}/quad) against your configured GeoTIFF export target ({totalExportW} × {totalExportH} px).";
+            }
+        }
+
+        // 3. Source DEM Fidelity Comparison (3D Preview vs Native Source DEM)
+        int sourcePx = Math.Max(1, Math.Max(_exportAreaStats.PixelWidth, _exportAreaStats.PixelHeight));
+        double sourceTexRatio = (double)gpuTexDim / sourcePx;
+        double sourceMeshRatio = (double)meshSegs / sourcePx;
+
+        if (Bdr3DSourceFidelityBadge != null && Txt3DSourceFidelityBadge != null && Txt3DSourceFidelityDesc != null)
+        {
+            if (Math.Abs(sourceTexRatio - 1.0) < 0.05)
+            {
+                Bdr3DSourceFidelityBadge.Background = (Brush)Resources["ThemeAccentExport"] ?? Brushes.LightGreen;
+                Txt3DSourceFidelityBadge.Text = "✓ 3D vs. SOURCE: 1:1 TEX";
+                Txt3DSourceFidelityDesc.Text = $"Texture is 1:1 with source ({mpp:0.##} m/px) • Mesh is {meshSegs}² quads (~{FormatMetricDistance(quadStepMeters)}/quad).";
+                if (Txt3DSourceFidelityTooltipTitle != null)
+                    Txt3DSourceFidelityTooltipTitle.Text = $"3D vs. Source: 1:1 Texture Parity ({gpuTexDim} px vs. {sourcePx} px)";
+            }
+            else if (sourceTexRatio < 0.95)
+            {
+                Bdr3DSourceFidelityBadge.Background = (Brush)Resources["ThemeAccentPrimary"] ?? Brushes.Cyan;
+                Txt3DSourceFidelityBadge.Text = $"▼ 3D vs. SOURCE ({sourceTexRatio:0.##}× TEX)";
+                Txt3DSourceFidelityDesc.Text = $"Texture samples {sourceTexRatio:0.##}× of source ({FormatMetricDistance(texStepMeters)}/px) • Mesh is {meshSegs}² quads.";
+                if (Txt3DSourceFidelityTooltipTitle != null)
+                    Txt3DSourceFidelityTooltipTitle.Text = $"3D vs. Source: Downsampled Texture ({sourceTexRatio:0.##}×)";
+            }
+            else
+            {
+                Bdr3DSourceFidelityBadge.Background = (Brush)Resources["ThemeAccentWarning"] ?? Brushes.Orange;
+                Txt3DSourceFidelityBadge.Text = $"▲ 3D vs. SOURCE ({sourceTexRatio:0.##}× TEX)";
+                Txt3DSourceFidelityDesc.Text = $"Texture supersamples {sourceTexRatio:0.##}× • Higher tier unlocks {meshSegs}² mesh quads (~{FormatMetricDistance(quadStepMeters)}/quad).";
+                if (Txt3DSourceFidelityTooltipTitle != null)
+                    Txt3DSourceFidelityTooltipTitle.Text = $"3D vs. Source: Supersampled Texture ({sourceTexRatio:0.##}×) & Denser 3D Mesh ({meshSegs}² quads)";
+            }
+            if (Txt3DSourceFidelityTooltipDesc != null)
+            {
+                Txt3DSourceFidelityTooltipDesc.Text = $"Source DEM span: {sourcePx} px ({mpp:0.##} m/px). 3D GPU Texture: {gpuTexDim}×{gpuTexDim} px ({sourceTexRatio:0.##}× of source). 3D Vertex Mesh: {meshSegs}×{meshSegs} quads ({sourceMeshRatio:0.##}× of source, ~{FormatMetricDistance(quadStepMeters)}/quad). Selecting a higher 3D resolution tier increases 3D mesh vertex density up to 1024×1024 quads (1,048,576 quads), revealing true source elevation detail inside the 3D silhouette.";
             }
         }
     }

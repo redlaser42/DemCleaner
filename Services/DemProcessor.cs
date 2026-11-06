@@ -1001,7 +1001,7 @@ public static class DemProcessor
         };
     }
 
-    public static float SampleMosaicPixel(MosaicDescriptor mosaic, int mx, int my)
+    public static float SampleMosaicPixel(MosaicDescriptor mosaic, int mx, int my, bool showProcessed = true)
     {
         mx = Math.Clamp(mx, 0, mosaic.TotalWidth - 1);
         my = Math.Clamp(my, 0, mosaic.TotalHeight - 1);
@@ -1040,16 +1040,25 @@ public static class DemProcessor
 
         localX = Math.Clamp(localX, 0, tile.Width - 1);
         localY = Math.Clamp(localY, 0, tile.Height - 1);
+        int idx = localY * tile.Width + localX;
+
+        if (!showProcessed)
+        {
+            if (tile.VoidMask != null && tile.VoidMask[idx])
+                return mosaic.FallbackElevation;
+            return tile.RawData[idx];
+        }
 
         float[] source = tile.FilledData ?? tile.RawData;
-        return source[localY * tile.Width + localX];
+        return source[idx];
     }
 
     /// <summary>
     /// Computes pixel coordinates and min/max/mean elevation within a normalized viewport selection [normX0..normX1, normY0..normY1].
+    /// When exactCalculation is true, every pixel is sampled without striding, preventing peak/valley clipping in 16-bit elevation normalization.
     /// </summary>
     public static ExportAreaStats ComputeExportAreaStats(
-        MosaicDescriptor mosaic, double normX0, double normY0, double normX1, double normY1)
+        MosaicDescriptor mosaic, double normX0, double normY0, double normX1, double normY1, bool exactCalculation = false)
     {
         normX0 = Math.Clamp(normX0, 0.0, 1.0);
         normY0 = Math.Clamp(normY0, 0.0, 1.0);
@@ -1068,23 +1077,53 @@ public static class DemProcessor
         int ph = Math.Max(1, py1 - py0);
 
         // Step stride for fast interactive stats calculation when dragging on huge grids
-        int stepX = Math.Max(1, pw / 512);
-        int stepY = Math.Max(1, ph / 512);
+        int stepX = exactCalculation ? 1 : Math.Max(1, pw / 512);
+        int stepY = exactCalculation ? 1 : Math.Max(1, ph / 512);
 
         float minE = float.MaxValue;
         float maxE = float.MinValue;
         double sumE = 0.0;
         long count = 0;
 
-        for (int y = py0; y < py1; y += stepY)
+        if (exactCalculation && (long)pw * ph > 262144L)
         {
-            for (int x = px0; x < px1; x += stepX)
+            object syncObj = new object();
+            Parallel.For(py0, py1, () => (LocalMin: float.MaxValue, LocalMax: float.MinValue, LocalSum: 0.0, LocalCount: 0L),
+                (y, loop, local) =>
+                {
+                    for (int x = px0; x < px1; x++)
+                    {
+                        float v = SampleMosaicPixel(mosaic, x, y);
+                        if (v < local.LocalMin) local.LocalMin = v;
+                        if (v > local.LocalMax) local.LocalMax = v;
+                        local.LocalSum += v;
+                        local.LocalCount++;
+                    }
+                    return local;
+                },
+                local =>
+                {
+                    lock (syncObj)
+                    {
+                        if (local.LocalMin < minE) minE = local.LocalMin;
+                        if (local.LocalMax > maxE) maxE = local.LocalMax;
+                        sumE += local.LocalSum;
+                        count += local.LocalCount;
+                    }
+                });
+        }
+        else
+        {
+            for (int y = py0; y < py1; y += stepY)
             {
-                float v = SampleMosaicPixel(mosaic, x, y);
-                if (v < minE) minE = v;
-                if (v > maxE) maxE = v;
-                sumE += v;
-                count++;
+                for (int x = px0; x < px1; x += stepX)
+                {
+                    float v = SampleMosaicPixel(mosaic, x, y);
+                    if (v < minE) minE = v;
+                    if (v > maxE) maxE = v;
+                    sumE += v;
+                    count++;
+                }
             }
         }
 
@@ -1252,7 +1291,6 @@ public static class DemProcessor
         float waterAltitudeLimit = 0.24f,
         CancellationToken cancellationToken = default)
     {
-        // Strictly enforce 1K, 2K, 4K, 8K, or 16K sampling resolution
         int sampleDim = requestedResolution switch
         {
             <= 1024 => 1024,
@@ -1262,31 +1300,66 @@ public static class DemProcessor
             _ => 16384
         };
 
-        // Distinct GPU texture & 3D mesh subdivisions at every single resolution tier (1K, 2K, 4K, 8K, 16K)
-        // so switching between any resolution produces a clear, visible change in 3D geometry & normal detail.
         int gpuTexDim = sampleDim switch
         {
             <= 1024 => 1024,
             <= 2048 => 2048,
             <= 4096 => 4096,
-            _ => 8192 // D3D9 max hardware texture dimension (8192x8192); 16K uses 16K sub-pixel normal sampling + 1024x1024 3D mesh
+            _ => 8192
+        };
+
+        var (terrainMesh, skirtMesh, meshDim) = Build3DHeightmapMesh(
+            mosaic, normX0, normY0, normX1, normY1, requestedResolution, minElev, maxElev, showProcessed, cancellationToken);
+
+        var textureBitmap = Build3DHeightmapTexture(
+            mosaic, normX0, normY0, normX1, normY1, requestedResolution, minElev, maxElev, showProcessed, shadingMode, simulateWater, highlightQuadEdges, waterSlopeLimit, waterAltitudeLimit, cancellationToken);
+
+        return new Heightmap3DAssets(
+            terrainMesh,
+            skirtMesh,
+            textureBitmap,
+            gpuTexDim,
+            meshDim,
+            minElev,
+            maxElev);
+    }
+
+    /// <summary>
+    /// Builds displaced 3D terrain and skirting MeshGeometry3D independently of the terrain shading texture.
+    /// Allows changing terrain shaders without regenerating the heightfield mesh.
+    /// </summary>
+    public static (MeshGeometry3D TerrainMesh, MeshGeometry3D SkirtMesh, int MeshDim) Build3DHeightmapMesh(
+        MosaicDescriptor mosaic,
+        double normX0,
+        double normY0,
+        double normX1,
+        double normY1,
+        int requestedResolution,
+        float minElev,
+        float maxElev,
+        bool showProcessed,
+        CancellationToken cancellationToken = default)
+    {
+        int sampleDim = requestedResolution switch
+        {
+            <= 1024 => 1024,
+            <= 2048 => 2048,
+            <= 4096 => 4096,
+            <= 8192 => 8192,
+            _ => 16384
         };
 
         int meshSegs = sampleDim switch
         {
-            <= 1024 => 64,    // 4,096 quads
-            <= 2048 => 128,   // 16,384 quads
-            <= 4096 => 256,   // 65,536 quads
-            <= 8192 => 512,   // 262,144 quads
+            <= 1024 => 256,   // 65,536 quads
+            <= 2048 => 512,   // 262,144 quads
+            <= 4096 => 768,   // 589,824 quads
             _ => 1024         // 1,048,576 quads
         };
         int meshDim = meshSegs + 1;
-        int texelsPerQuad = Math.Max(1, gpuTexDim / meshSegs);
 
-        // Throttle worker threads to half of logical cores so OS DWM and background video playback never stutter
         var throttledParallelOptions = new ParallelOptions
         {
-            CancellationToken = cancellationToken,
             MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2)
         };
 
@@ -1303,225 +1376,35 @@ public static class DemProcessor
         float elevRange = Math.Max(1e-4f, maxElev - minElev);
         float invRange = 1f / elevRange;
 
-        // Multi-scale neighborhood radii (in source DEM pixels) to filter out small lakes/ponds
-        double waterRadiusMedX = Math.Max(8.0, srcW * 0.012);
-        double waterRadiusMedY = Math.Max(8.0, srcH * 0.012);
-        double waterRadiusWideX = Math.Max(22.0, srcW * 0.030);
-        double waterRadiusWideY = Math.Max(22.0, srcH * 0.030);
-
-        // 1. Build GPU albedo + micro-normal hillshade texture (with optional flat-water blue shading & quad edge wireframe)
-        var writeableBmp = new WriteableBitmap(gpuTexDim, gpuTexDim, 96.0, 96.0, PixelFormats.Bgr24, null);
-        writeableBmp.Lock();
-        try
-        {
-            IntPtr backBuffer = writeableBmp.BackBuffer;
-            int backStride = writeableBmp.BackBufferStride;
-
-            double texStepX = srcW / gpuTexDim;
-            double texStepY = srcH / gpuTexDim;
-
-            // Fine gradient step and normal strength scale with the requested resolution (1K -> 16K)
-            double gradDeltaX = Math.Max(0.25, srcW / sampleDim);
-            double gradDeltaY = Math.Max(0.25, srcH / sampleDim);
-            float normalStrength = sampleDim switch
-            {
-                <= 1024 => 3.5f,
-                <= 2048 => 6.5f,
-                <= 4096 => 11.5f,
-                <= 8192 => 18.0f,
-                _ => 26.0f
-            };
-            int quadLineWidth = gpuTexDim >= 8192 ? 2 : 1;
-
-            Parallel.For(0, gpuTexDim, throttledParallelOptions, ty =>
-            {
-                byte[] rowBytes = new byte[gpuTexDim * 3];
-                bool isHorizontalQuadEdge = highlightQuadEdges &&
-                    ((ty % texelsPerQuad) < quadLineWidth || ty >= gpuTexDim - quadLineWidth);
-
-                double fy = srcY0 + (ty + 0.5) * texStepY - 0.5;
-                double fyUp = Math.Max(0.0, fy - gradDeltaY);
-                double fyDown = Math.Min(mosaic.TotalHeight - 1.0, fy + gradDeltaY);
-                int iy = Math.Clamp((int)Math.Round(fy), 0, mosaic.TotalHeight - 1);
-
-                for (int tx = 0; tx < gpuTexDim; tx++)
-                {
-                    int pxOffset = tx * 3;
-                    double fx = srcX0 + (tx + 0.5) * texStepX - 0.5;
-                    int ix = Math.Clamp((int)Math.Round(fx), 0, mosaic.TotalWidth - 1);
-
-                    float centerElev = SampleMosaicPixelBilinear(mosaic, fx, fy, showProcessed, out bool isVoid);
-                    byte finalR, finalG, finalB;
-
-                    if (!showProcessed && isVoid)
-                    {
-                        finalR = 235;
-                        finalG = 55;
-                        finalB = 75;
-                    }
-                    else
-                    {
-                        float hNorm = Math.Clamp((centerElev - minElev) * invRange, 0f, 1f);
-
-                        double fxLeft = Math.Max(0.0, fx - gradDeltaX);
-                        double fxRight = Math.Min(mosaic.TotalWidth - 1.0, fx + gradDeltaX);
-
-                        // Use bilinear sampling at fine sampleDim offsets so 8K and 16K resolve sub-pixel micro-normals cleanly
-                        float elevL = SampleMosaicPixelBilinear(mosaic, fxLeft, fy, showProcessed, out _);
-                        float elevR = SampleMosaicPixelBilinear(mosaic, fxRight, fy, showProcessed, out _);
-                        float elevU = SampleMosaicPixelBilinear(mosaic, fx, fyUp, showProcessed, out _);
-                        float elevD = SampleMosaicPixelBilinear(mosaic, fx, fyDown, showProcessed, out _);
-
-                        float hL = Math.Clamp((elevL - minElev) * invRange, 0f, 1f);
-                        float hR = Math.Clamp((elevR - minElev) * invRange, 0f, 1f);
-                        float hU = Math.Clamp((elevU - minElev) * invRange, 0f, 1f);
-                        float hD = Math.Clamp((elevD - minElev) * invRange, 0f, 1f);
-
-                        float dX = (hR - hL) * normalStrength;
-                        float dY = (hD - hU) * normalStrength;
-
-                        float invLen = 1f / MathF.Sqrt(dX * dX + dY * dY + 1f);
-                        float nx = -dX * invLen;
-                        float ny = invLen;
-                        float nz = -dY * invLen;
-
-                        float microShade = Math.Clamp(0.60f + 0.40f * (nx * -0.55f + ny * 0.68f + nz * -0.48f), 0.30f, 1.20f);
-                        float slope = 1f - ny;
-
-                        EvaluateTerrainColorRamp(shadingMode, hNorm, slope, microShade, out finalR, out finalG, out finalB);
-
-                        // Shade large, low-elevation flat water bodies using configurable slope & altitude limits
-                        float maxAltNorm = Math.Clamp(waterAltitudeLimit, 0.005f, 1.0f);
-                        float maxSlopeMeters = Math.Clamp(waterSlopeLimit, 0.005f, 5.0f);
-                        float localSlopeThreshold = Math.Max(0.003f, maxSlopeMeters * 0.5f);
-                        float localNormThreshold = Math.Max(1e-5f, localSlopeThreshold * invRange * 1.2f);
-
-                        if (simulateWater && hNorm <= maxAltNorm)
-                        {
-                            float localDiffMeters = MathF.Max(MathF.Abs(elevR - elevL), MathF.Abs(elevD - elevU));
-                            float localNormGrad = MathF.Max(MathF.Abs(hR - hL), MathF.Abs(hD - hU));
-                            float localFlatMetric = MathF.Min(localDiffMeters / localSlopeThreshold, localNormGrad / localNormThreshold);
-
-                            if (localFlatMetric < 1.0f)
-                            {
-                                // Check medium and wide 8-directional rings around (ix, iy) so small ponds/lakes are rejected
-                                int mRx = Math.Max(4, (int)Math.Round(waterRadiusMedX));
-                                int mRy = Math.Max(4, (int)Math.Round(waterRadiusMedY));
-                                int wRx = Math.Max(10, (int)Math.Round(waterRadiusWideX));
-                                int wRy = Math.Max(10, (int)Math.Round(waterRadiusWideY));
-
-                                int mDiagX = (int)(mRx * 0.707);
-                                int mDiagY = (int)(mRy * 0.707);
-                                int wDiagX = (int)(wRx * 0.707);
-                                int wDiagY = (int)(wRy * 0.707);
-
-                                float maxNeighborhoodDiff = 0f;
-
-                                // Medium ring (8 directions)
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix - mRx, iy, showProcessed) - centerElev));
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix + mRx, iy, showProcessed) - centerElev));
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix, iy - mRy, showProcessed) - centerElev));
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix, iy + mRy, showProcessed) - centerElev));
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix - mDiagX, iy - mDiagY, showProcessed) - centerElev));
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix + mDiagX, iy - mDiagY, showProcessed) - centerElev));
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix - mDiagX, iy + mDiagY, showProcessed) - centerElev));
-                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix + mDiagX, iy + mDiagY, showProcessed) - centerElev));
-
-                                if (maxNeighborhoodDiff < maxSlopeMeters)
-                                {
-                                    // Wide ring (8 directions) — ensures only expansive water bodies pass
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix - wRx, iy, showProcessed) - centerElev));
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix + wRx, iy, showProcessed) - centerElev));
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix, iy - wRy, showProcessed) - centerElev));
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix, iy + wRy, showProcessed) - centerElev));
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix - wDiagX, iy - wDiagY, showProcessed) - centerElev));
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix + wDiagX, iy - wDiagY, showProcessed) - centerElev));
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix - wDiagX, iy + wDiagY, showProcessed) - centerElev));
-                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixelFast(mosaic, ix + wDiagX, iy + wDiagY, showProcessed) - centerElev));
-                                }
-
-                                float wideFlatMetric = maxNeighborhoodDiff / maxSlopeMeters;
-                                float combinedFlatMetric = MathF.Max(localFlatMetric, wideFlatMetric);
-
-                                if (combinedFlatMetric < 1.0f)
-                                {
-                                    float tFlat = Math.Clamp((combinedFlatMetric - 0.25f) / 0.75f, 0f, 1f);
-                                    float flatWeight = 1f - (tFlat * tFlat * (3f - 2f * tFlat));
-
-                                    // Smoothly fade out water near the altitude limit
-                                    float fadeBand = Math.Max(0.01f, maxAltNorm * 0.25f);
-                                    float fadeStart = Math.Max(0f, maxAltNorm - fadeBand);
-                                    float tElev = maxAltNorm >= 0.995f
-                                        ? 0f
-                                        : Math.Clamp((hNorm - fadeStart) / fadeBand, 0f, 1f);
-                                    float elevWeight = 1f - (tElev * tElev * (3f - 2f * tElev));
-
-                                    float waterBlend = flatWeight * elevWeight;
-
-                                    float depthTone = Math.Clamp(hNorm / Math.Max(0.05f, maxAltNorm), 0f, 1f);
-                                    float wr = (30f + 26f * depthTone + 14f * (1f - waterBlend)) * microShade;
-                                    float wg = (100f + 44f * depthTone + 20f * (1f - waterBlend)) * microShade;
-                                    float wb = (176f + 40f * depthTone + 12f * (1f - waterBlend)) * microShade;
-
-                                    finalR = (byte)Math.Clamp((int)(finalR * (1f - waterBlend) + wr * waterBlend), 0, 255);
-                                    finalG = (byte)Math.Clamp((int)(finalG * (1f - waterBlend) + wg * waterBlend), 0, 255);
-                                    finalB = (byte)Math.Clamp((int)(finalB * (1f - waterBlend) + wb * waterBlend), 0, 255);
-                                }
-                            }
-                        }
-                    }
-
-                    // Highlight terrain mesh quad edges when enabled
-                    if (highlightQuadEdges)
-                    {
-                        bool isVerticalQuadEdge = (tx % texelsPerQuad) < quadLineWidth || tx >= gpuTexDim - quadLineWidth;
-                        if (isHorizontalQuadEdge || isVerticalQuadEdge)
-                        {
-                            // Blend crisp high-contrast cyan-gold quad wireframe line over terrain
-                            finalR = (byte)((finalR * 30 + 235 * 70) / 100);
-                            finalG = (byte)((finalG * 30 + 248 * 70) / 100);
-                            finalB = (byte)((finalB * 30 + 255 * 70) / 100);
-                        }
-                    }
-
-                    rowBytes[pxOffset + 0] = finalB;
-                    rowBytes[pxOffset + 1] = finalG;
-                    rowBytes[pxOffset + 2] = finalR;
-                }
-
-                IntPtr rowDest = IntPtr.Add(backBuffer, ty * backStride);
-                Marshal.Copy(rowBytes, 0, rowDest, rowBytes.Length);
-            });
-
-            writeableBmp.AddDirtyRect(new Int32Rect(0, 0, gpuTexDim, gpuTexDim));
-        }
-        finally
-        {
-            writeableBmp.Unlock();
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        writeableBmp.Freeze();
-
-        // 2. Build 3D Displaced MeshGeometry3D on background thread and Freeze for GPU upload
         float[,] gridHeights = new float[meshDim, meshDim];
         const float baseHeightAmplitude = 2.0f;
 
-        Parallel.For(0, meshDim, throttledParallelOptions, gy =>
+        Parallel.For(0, meshDim, throttledParallelOptions, (gy, state) =>
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                state.Stop();
+                return;
+            }
+
             double v = gy / (double)(meshDim - 1);
-            double fy = srcY0 + v * (srcH - 1.0);
+            double fy = Math.Clamp(srcY0 + v * srcH - 0.5, 0.0, mosaic.TotalHeight - 1.0);
             for (int gx = 0; gx < meshDim; gx++)
             {
                 double u = gx / (double)(meshDim - 1);
-                double fx = srcX0 + u * (srcW - 1.0);
+                double fx = Math.Clamp(srcX0 + u * srcW - 0.5, 0.0, mosaic.TotalWidth - 1.0);
                 float elev = SampleMosaicPixelBilinear(mosaic, fx, fy, showProcessed, out _);
                 float hNorm = Math.Clamp((elev - minElev) * invRange, 0f, 1f);
                 gridHeights[gy, gx] = hNorm * baseHeightAmplitude;
             }
         });
 
-        cancellationToken.ThrowIfCancellationRequested();
+        if (cancellationToken.IsCancellationRequested)
+        {
+            var emptyMesh = new MeshGeometry3D();
+            emptyMesh.Freeze();
+            return (emptyMesh, emptyMesh, meshDim);
+        }
 
         int vertexCount = meshDim * meshDim;
         int quadCount = (meshDim - 1) * (meshDim - 1);
@@ -1594,18 +1477,268 @@ public static class DemProcessor
         };
         terrainMesh.Freeze();
 
-        // 3. Build solid geological pedestal / skirt around the 4 sides of the heightmap block
         var skirtMesh = BuildTerrainSkirtMesh(gridHeights, meshDim);
         skirtMesh.Freeze();
 
-        return new Heightmap3DAssets(
-            terrainMesh,
-            skirtMesh,
-            writeableBmp,
-            sampleDim,
-            meshDim,
-            minElev,
-            maxElev);
+        return (terrainMesh, skirtMesh, meshDim);
+    }
+
+    /// <summary>
+    /// Builds the GPU terrain shader texture bitmap (albedo, hillshading, water simulation, quad edges)
+    /// independently of mesh geometry. Allows fast shader updates without mesh rebuilding.
+    /// </summary>
+    public static BitmapSource Build3DHeightmapTexture(
+        MosaicDescriptor mosaic,
+        double normX0,
+        double normY0,
+        double normX1,
+        double normY1,
+        int requestedResolution,
+        float minElev,
+        float maxElev,
+        bool showProcessed,
+        TerrainShadingMode shadingMode,
+        bool simulateWater = true,
+        bool highlightQuadEdges = false,
+        float waterSlopeLimit = 0.12f,
+        float waterAltitudeLimit = 0.24f,
+        CancellationToken cancellationToken = default)
+    {
+        int sampleDim = requestedResolution switch
+        {
+            <= 1024 => 1024,
+            <= 2048 => 2048,
+            <= 4096 => 4096,
+            <= 8192 => 8192,
+            _ => 16384
+        };
+
+        int gpuTexDim = sampleDim switch
+        {
+            <= 1024 => 1024,
+            <= 2048 => 2048,
+            <= 4096 => 4096,
+            _ => 8192
+        };
+
+        int meshSegs = sampleDim switch
+        {
+            <= 1024 => 256,
+            <= 2048 => 512,
+            <= 4096 => 768,
+            _ => 1024
+        };
+        int texelsPerQuad = Math.Max(1, gpuTexDim / meshSegs);
+
+        var throttledParallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2)
+        };
+
+        normX0 = Math.Clamp(normX0, 0.0, 0.999);
+        normY0 = Math.Clamp(normY0, 0.0, 0.999);
+        normX1 = Math.Clamp(normX1, normX0 + 0.001, 1.0);
+        normY1 = Math.Clamp(normY1, normY0 + 0.001, 1.0);
+
+        double srcX0 = normX0 * mosaic.TotalWidth;
+        double srcY0 = normY0 * mosaic.TotalHeight;
+        double srcW = Math.Max(1.0, (normX1 - normX0) * mosaic.TotalWidth);
+        double srcH = Math.Max(1.0, (normY1 - normY0) * mosaic.TotalHeight);
+
+        float elevRange = Math.Max(1e-4f, maxElev - minElev);
+        float invRange = 1f / elevRange;
+
+        double waterRadiusMedX = Math.Max(8.0, srcW * 0.012);
+        double waterRadiusMedY = Math.Max(8.0, srcH * 0.012);
+        double waterRadiusWideX = Math.Max(22.0, srcW * 0.030);
+        double waterRadiusWideY = Math.Max(22.0, srcH * 0.030);
+
+        var writeableBmp = new WriteableBitmap(gpuTexDim, gpuTexDim, 96.0, 96.0, PixelFormats.Bgr24, null);
+        writeableBmp.Lock();
+        try
+        {
+            IntPtr backBuffer = writeableBmp.BackBuffer;
+            int backStride = writeableBmp.BackBufferStride;
+
+            double texStepX = srcW / gpuTexDim;
+            double texStepY = srcH / gpuTexDim;
+
+            double gradDeltaX = Math.Max(0.5, srcW / sampleDim);
+            double gradDeltaY = Math.Max(0.5, srcH / sampleDim);
+            float normalStrengthX = (float)Math.Clamp(0.32 * (srcW / (2.0 * gradDeltaX)), 2.5, 45.0);
+            float normalStrengthY = (float)Math.Clamp(0.32 * (srcH / (2.0 * gradDeltaY)), 2.5, 45.0);
+            int quadLineWidth = gpuTexDim >= 8192 ? 2 : 1;
+
+            Parallel.For(0, gpuTexDim, throttledParallelOptions, (ty, state) =>
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    state.Stop();
+                    return;
+                }
+
+                byte[] rowBytes = new byte[gpuTexDim * 3];
+                bool isHorizontalQuadEdge = highlightQuadEdges &&
+                    ((ty % texelsPerQuad) < quadLineWidth || ty >= gpuTexDim - quadLineWidth);
+
+                double fy = srcY0 + (ty + 0.5) * texStepY - 0.5;
+                double fyUp = Math.Max(0.0, fy - gradDeltaY);
+                double fyDown = Math.Min(mosaic.TotalHeight - 1.0, fy + gradDeltaY);
+                int iy = Math.Clamp((int)Math.Round(fy), 0, mosaic.TotalHeight - 1);
+
+                for (int tx = 0; tx < gpuTexDim; tx++)
+                {
+                    int pxOffset = tx * 3;
+                    double fx = srcX0 + (tx + 0.5) * texStepX - 0.5;
+                    int ix = Math.Clamp((int)Math.Round(fx), 0, mosaic.TotalWidth - 1);
+
+                    float centerElev = SampleMosaicPixelBilinear(mosaic, fx, fy, showProcessed, out bool isVoid);
+                    byte finalR, finalG, finalB;
+
+                    if (!showProcessed && isVoid)
+                    {
+                        finalR = 235;
+                        finalG = 55;
+                        finalB = 75;
+                    }
+                    else
+                    {
+                        float hNorm = Math.Clamp((centerElev - minElev) * invRange, 0f, 1f);
+
+                        double fxLeft = Math.Max(0.0, fx - gradDeltaX);
+                        double fxRight = Math.Min(mosaic.TotalWidth - 1.0, fx + gradDeltaX);
+
+                        float elevL = SampleMosaicPixelBilinear(mosaic, fxLeft, fy, showProcessed, out _);
+                        float elevR = SampleMosaicPixelBilinear(mosaic, fxRight, fy, showProcessed, out _);
+                        float elevU = SampleMosaicPixelBilinear(mosaic, fx, fyUp, showProcessed, out _);
+                        float elevD = SampleMosaicPixelBilinear(mosaic, fx, fyDown, showProcessed, out _);
+
+                        float hL = Math.Clamp((elevL - minElev) * invRange, 0f, 1f);
+                        float hR = Math.Clamp((elevR - minElev) * invRange, 0f, 1f);
+                        float hU = Math.Clamp((elevU - minElev) * invRange, 0f, 1f);
+                        float hD = Math.Clamp((elevD - minElev) * invRange, 0f, 1f);
+
+                        float dX = (hR - hL) * normalStrengthX;
+                        float dY = (hD - hU) * normalStrengthY;
+
+                        float invLen = 1f / MathF.Sqrt(dX * dX + dY * dY + 1f);
+                        float nx = -dX * invLen;
+                        float ny = invLen;
+                        float nz = -dY * invLen;
+
+                        float microShade = Math.Clamp(0.60f + 0.40f * (nx * -0.55f + ny * 0.68f + nz * -0.48f), 0.30f, 1.20f);
+                        float slope = 1f - ny;
+
+                        EvaluateTerrainColorRamp(shadingMode, hNorm, slope, microShade, out finalR, out finalG, out finalB);
+
+                        float maxAltNorm = Math.Clamp(waterAltitudeLimit, 0.005f, 1.0f);
+                        float maxSlopeMeters = Math.Clamp(waterSlopeLimit, 0.005f, 5.0f);
+                        float localSlopeThreshold = Math.Max(0.003f, maxSlopeMeters * 0.5f);
+                        float localNormThreshold = Math.Max(1e-5f, localSlopeThreshold * invRange * 1.2f);
+
+                        if (simulateWater && hNorm <= maxAltNorm)
+                        {
+                            float localDiffMeters = MathF.Max(MathF.Abs(elevR - elevL), MathF.Abs(elevD - elevU));
+                            float localNormGrad = MathF.Max(MathF.Abs(hR - hL), MathF.Abs(hD - hU));
+                            float localFlatMetric = MathF.Min(localDiffMeters / localSlopeThreshold, localNormGrad / localNormThreshold);
+
+                            if (localFlatMetric < 1.0f)
+                            {
+                                int mRx = Math.Max(4, (int)Math.Round(waterRadiusMedX));
+                                int mRy = Math.Max(4, (int)Math.Round(waterRadiusMedY));
+                                int wRx = Math.Max(10, (int)Math.Round(waterRadiusWideX));
+                                int wRy = Math.Max(10, (int)Math.Round(waterRadiusWideY));
+
+                                int mDiagX = (int)(mRx * 0.707);
+                                int mDiagY = (int)(mRy * 0.707);
+                                int wDiagX = (int)(wRx * 0.707);
+                                int wDiagY = (int)(wRy * 0.707);
+
+                                float maxNeighborhoodDiff = 0f;
+
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix - mRx, iy, showProcessed) - centerElev));
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix + mRx, iy, showProcessed) - centerElev));
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix, iy - mRy, showProcessed) - centerElev));
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix, iy + mRy, showProcessed) - centerElev));
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix - mDiagX, iy - mDiagY, showProcessed) - centerElev));
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix + mDiagX, iy - mDiagY, showProcessed) - centerElev));
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix - mDiagX, iy + mDiagY, showProcessed) - centerElev));
+                                maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix + mDiagX, iy + mDiagY, showProcessed) - centerElev));
+
+                                if (maxNeighborhoodDiff < maxSlopeMeters)
+                                {
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix - wRx, iy, showProcessed) - centerElev));
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix + wRx, iy, showProcessed) - centerElev));
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix, iy - wRy, showProcessed) - centerElev));
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix, iy + wRy, showProcessed) - centerElev));
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix - wDiagX, iy - wDiagY, showProcessed) - centerElev));
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix + wDiagX, iy - wDiagY, showProcessed) - centerElev));
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix - wDiagX, iy + wDiagY, showProcessed) - centerElev));
+                                    maxNeighborhoodDiff = MathF.Max(maxNeighborhoodDiff, MathF.Abs(SampleMosaicPixel(mosaic, ix + wDiagX, iy + wDiagY, showProcessed) - centerElev));
+                                }
+
+                                float wideFlatMetric = maxNeighborhoodDiff / maxSlopeMeters;
+                                float combinedFlatMetric = MathF.Max(localFlatMetric, wideFlatMetric);
+
+                                if (combinedFlatMetric < 1.0f)
+                                {
+                                    float tFlat = Math.Clamp((combinedFlatMetric - 0.25f) / 0.75f, 0f, 1f);
+                                    float flatWeight = 1f - (tFlat * tFlat * (3f - 2f * tFlat));
+
+                                    float fadeBand = Math.Max(0.01f, maxAltNorm * 0.25f);
+                                    float fadeStart = Math.Max(0f, maxAltNorm - fadeBand);
+                                    float tElev = maxAltNorm >= 0.995f
+                                        ? 0f
+                                        : Math.Clamp((hNorm - fadeStart) / fadeBand, 0f, 1f);
+                                    float elevWeight = 1f - (tElev * tElev * (3f - 2f * tElev));
+
+                                    float waterBlend = flatWeight * elevWeight;
+
+                                    float depthTone = Math.Clamp(hNorm / Math.Max(0.05f, maxAltNorm), 0f, 1f);
+                                    float wr = (30f + 26f * depthTone + 14f * (1f - waterBlend)) * microShade;
+                                    float wg = (100f + 44f * depthTone + 20f * (1f - waterBlend)) * microShade;
+                                    float wb = (176f + 40f * depthTone + 12f * (1f - waterBlend)) * microShade;
+
+                                    finalR = (byte)Math.Clamp((int)(finalR * (1f - waterBlend) + wr * waterBlend), 0, 255);
+                                    finalG = (byte)Math.Clamp((int)(finalG * (1f - waterBlend) + wg * waterBlend), 0, 255);
+                                    finalB = (byte)Math.Clamp((int)(finalB * (1f - waterBlend) + wb * waterBlend), 0, 255);
+                                }
+                            }
+                        }
+                    }
+
+                    if (highlightQuadEdges)
+                    {
+                        bool isVerticalQuadEdge = (tx % texelsPerQuad) < quadLineWidth || tx >= gpuTexDim - quadLineWidth;
+                        if (isHorizontalQuadEdge || isVerticalQuadEdge)
+                        {
+                            finalR = (byte)((finalR * 30 + 235 * 70) / 100);
+                            finalG = (byte)((finalG * 30 + 248 * 70) / 100);
+                            finalB = (byte)((finalB * 30 + 255 * 70) / 100);
+                        }
+                    }
+
+                    rowBytes[pxOffset + 0] = finalB;
+                    rowBytes[pxOffset + 1] = finalG;
+                    rowBytes[pxOffset + 2] = finalR;
+                }
+
+                IntPtr rowDest = IntPtr.Add(backBuffer, ty * backStride);
+                Marshal.Copy(rowBytes, 0, rowDest, rowBytes.Length);
+            });
+
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                writeableBmp.AddDirtyRect(new Int32Rect(0, 0, gpuTexDim, gpuTexDim));
+            }
+        }
+        finally
+        {
+            writeableBmp.Unlock();
+        }
+
+        writeableBmp.Freeze();
+        return writeableBmp;
     }
 
     private static MeshGeometry3D BuildTerrainSkirtMesh(float[,] gridHeights, int meshDim)
@@ -1667,49 +1800,6 @@ public static class DemProcessor
         };
     }
 
-    private static float SampleMosaicPixelFast(MosaicDescriptor mosaic, int mx, int my, bool showProcessed)
-    {
-        mx = Math.Clamp(mx, 0, mosaic.TotalWidth - 1);
-        my = Math.Clamp(my, 0, mosaic.TotalHeight - 1);
-
-        int col = 0;
-        for (int c = mosaic.GridCols - 1; c >= 0; c--)
-        {
-            if (mx >= mosaic.ColOffsets[c]) { col = c; break; }
-        }
-
-        int row = 0;
-        for (int r = mosaic.GridRows - 1; r >= 0; r--)
-        {
-            if (my >= mosaic.RowOffsets[r]) { row = r; break; }
-        }
-
-        DemTile? tile = mosaic.TileGrid[row, col];
-        if (tile == null) return mosaic.FallbackElevation;
-
-        int localX = mx - mosaic.ColOffsets[col];
-        int localY = my - mosaic.RowOffsets[row];
-
-        if (tile.Width != mosaic.ColWidths[col] && mosaic.ColWidths[col] > 0)
-            localX = (int)((long)localX * tile.Width / mosaic.ColWidths[col]);
-        if (tile.Height != mosaic.RowHeights[row] && mosaic.RowHeights[row] > 0)
-            localY = (int)((long)localY * tile.Height / mosaic.RowHeights[row]);
-
-        localX = Math.Clamp(localX, 0, tile.Width - 1);
-        localY = Math.Clamp(localY, 0, tile.Height - 1);
-        int idx = localY * tile.Width + localX;
-
-        if (!showProcessed)
-        {
-            if (tile.VoidMask != null && tile.VoidMask[idx])
-                return mosaic.FallbackElevation;
-            return tile.RawData[idx];
-        }
-
-        float[] source = tile.FilledData ?? tile.RawData;
-        return source[idx];
-    }
-
     private static float SampleMosaicPixelBilinear(MosaicDescriptor mosaic, double fx, double fy, bool showProcessed, out bool isVoid)
     {
         int x0 = Math.Clamp((int)Math.Floor(fx), 0, mosaic.TotalWidth - 1);
@@ -1727,10 +1817,10 @@ public static class DemProcessor
         float wx = (float)Math.Clamp(fx - x0, 0.0, 1.0);
         float wy = (float)Math.Clamp(fy - y0, 0.0, 1.0);
 
-        float v00 = SampleMosaicPixelFast(mosaic, x0, y0, showProcessed);
-        float v10 = SampleMosaicPixelFast(mosaic, x1, y0, showProcessed);
-        float v01 = SampleMosaicPixelFast(mosaic, x0, y1, showProcessed);
-        float v11 = SampleMosaicPixelFast(mosaic, x1, y1, showProcessed);
+        float v00 = SampleMosaicPixel(mosaic, x0, y0, showProcessed);
+        float v10 = SampleMosaicPixel(mosaic, x1, y0, showProcessed);
+        float v01 = SampleMosaicPixel(mosaic, x0, y1, showProcessed);
+        float v11 = SampleMosaicPixel(mosaic, x1, y1, showProcessed);
 
         float top = v00 + (v10 - v00) * wx;
         float bottom = v01 + (v11 - v01) * wx;

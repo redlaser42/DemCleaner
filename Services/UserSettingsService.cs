@@ -22,6 +22,7 @@ public class UserSettings
     public int ResolutionPresetSetIndex { get; set; } = 0;
     public string ExportWidth { get; set; } = "1024";
     public string ExportHeight { get; set; } = "1024";
+    public bool MatchNativeExportResolution { get; set; } = true;
     public bool LockExportAspectRatio { get; set; } = false;
     public int ExportFileFormatIndex { get; set; } = 0;
     public string ExportFolder { get; set; } = string.Empty;
