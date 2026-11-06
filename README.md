@@ -36,27 +36,30 @@
 - **Interactive 2D & 3D Viewports**: Inspect your terrain in a full 2D mosaic view or explore a hardware-accelerated 3D preview with adjustable sun angles, wireframe overlays, and hypsometric color ramps.
 - **Custom Crop & Sub-Tile Splitting**: Draw a custom region box to export only the area you need. Split the output into a single merged heightmap, the original tile grid, or custom subdivided tiles.
 - **Engine-Ready Presets**: Export directly to standard landscape dimensions for **Unreal Engine** (8129, 4033, 2017) or **Unity** (4097, 2049, 1025) as 16-bit grayscale PNG or 32-bit float GeoTIFF.
+- **Helpful UI**: Lots of helfpul statistics and graphs to help users of heighmap worfkows, like the human scale ground reference graph:   <img src="scale-graph.gif" alt="Scale Graph Gif" width="90%" />
+
+
 
 ---
 
 ## Visual Tour
 
-### 2D Mosaic & Telemetry
+### 2D Grid Mosaic
 View your entire dataset at once with instant stats for tile count, void pixels, elevation span ($\Delta Z$), and physical real-world coverage.
 
 <p align="center">
   <img src="images/preview-grid-layout.png" alt="2D Mosaic Layout" width="90%" />
 </p>
 
-### Hardware-Accelerated 3D Visualizer
+### 3D Visualizer
 Check slope transitions, lighting, and terrain contours before export. Supports multiple color ramps, wireframe overlays, and elevation exaggeration.
 
 <p align="center">
   <img src="images/preview-3d-visualizer.png" alt="3D Terrain Visualizer" width="90%" />
 </p>
 
-### Custom Region Crop & Scale Reference
-Crop any square area with real-time ground distance, effective meters-per-pixel readouts, and a human-scale reference to evaluate terrain resolution against a real-world figure.
+### Custom Export Region Crop
+Crop any square area with real-time ground distance, effective meters-per-pixel readouts.
 
 <p align="center">
   <img src="images/preview-custom-region.png" alt="Custom Region Selection" width="90%" />
@@ -78,7 +81,7 @@ Free real-world elevation GeoTIFF datasets can be downloaded from:
 - **[USGS 3D Elevation Program (3DEP)](https://www.usgs.gov/3d-elevation-program)**: Program overview and data access guides.
 
 ### Installation
-1. Download the latest release from the [Releases](https://github.com/sippstudio/dem-cleaner/releases) page.
+1. Download the latest release from https://github.com/redlaser42/DemCleaner/releases.
 2. Extract the archive to any folder.
 3. Run `DemCleaner.exe`.
 
